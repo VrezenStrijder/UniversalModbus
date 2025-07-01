@@ -1,0 +1,26 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="UMClient.App"
+             xmlns:local="using:UMClient"
+			 xmlns:suki="using:SukiUI"
+			 xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+
+             RequestedThemeVariant="Default">
+	<!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+	<Application.DataTemplates>
+		<local:ViewLocator/>
+	</Application.DataTemplates>
+
+	<Application.Styles>
+		<!--<suki:SukiTheme />
+		<icons:MaterialIconStyles />-->
+
+		<!-- 配置 SukiTheme 并禁用透明效果 -->
+		<suki:SukiTheme ThemeColor="Blue" />
+		<icons:MaterialIconStyles />
+		<!-- 加入DataGrid和Material图标支持 -->
+		<StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+
+	</Application.Styles>
+</Application>
