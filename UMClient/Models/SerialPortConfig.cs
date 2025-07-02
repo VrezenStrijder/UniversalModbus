@@ -11,7 +11,7 @@ namespace UMClient.Models
     {
         public string PortName { get; set; } = "COM1";
 
-        public int BaudRate { get; set; } = 9600;
+        public int BaudRate { get; set; } = 115200;
 
         public Parity Parity { get; set; } = Parity.None;
 

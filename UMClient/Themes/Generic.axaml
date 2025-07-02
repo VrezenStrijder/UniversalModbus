@@ -1,0 +1,42 @@
+<!-- Themes/Generic.axaml -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:UMClient.Controls">
+
+	<Style Selector="controls|ColoredTextDisplay">
+		<Setter Property="Background" Value="Black"/>
+		<Setter Property="Template">
+			<ControlTemplate>
+				<ScrollViewer Name="PART_ScrollViewer"
+							 Background="{TemplateBinding Background}"
+							 VerticalScrollBarVisibility="Auto"
+							 HorizontalScrollBarVisibility="Disabled"
+							 VerticalContentAlignment="Bottom" >
+					<ItemsControl Name="PART_ItemsControl">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate DataType="controls:ColoredTextItem">
+								<Border Background="Transparent" Margin="0">
+									<TextBlock Text="{Binding Text}"
+										  Foreground="{Binding Foreground}"
+										  FontFamily="Microsoft YaHei"
+										  FontSize="14"
+										  LineHeight="12"
+										  TextWrapping="Wrap"
+										  VerticalAlignment="Center"
+										  Margin="2, 4, 2, 1"/>
+								</Border>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+						<ItemsControl.ItemsPanel>
+							<ItemsPanelTemplate>
+								<!-- 使用虚拟化面板 -->
+								<VirtualizingStackPanel Orientation="Vertical"/>
+							</ItemsPanelTemplate>
+						</ItemsControl.ItemsPanel>
+					</ItemsControl>
+				</ScrollViewer>
+			</ControlTemplate>
+		</Setter>
+	</Style>
+
+</Styles>
