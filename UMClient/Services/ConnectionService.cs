@@ -16,6 +16,7 @@ namespace UMClient.Services
 
         event EventHandler<byte[]>? DataReceived;
     }
+
     public class ConnectionService
     {
         private readonly List<IConnection> connections = new List<IConnection>();
