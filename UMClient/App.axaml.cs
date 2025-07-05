@@ -34,7 +34,7 @@ namespace UMClient
                 // 程序退出时保存配置
                 desktop.ShutdownRequested += (s, e) =>
                 {
-                    mainViewModel.SaveConfiguration();
+                    //mainViewModel.SaveConfiguration();
                 };
             }
 

@@ -21,6 +21,6 @@
 		<icons:MaterialIconStyles />
 		<!-- 加入DataGrid和Material图标支持 -->
 		<StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
-
+		<StyleInclude Source="/Themes/Generic.axaml" />
 	</Application.Styles>
 </Application>
