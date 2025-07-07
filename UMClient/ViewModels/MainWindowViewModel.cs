@@ -11,6 +11,12 @@ using UMClient.Models;
 using UMClient.Services;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia;
+using Avalonia.Controls.Documents;
+using Avalonia.Media;
+using System.ComponentModel;
+using System.Collections.Generic;
+using UMClient.Controls;
+using SukiUI.Models;
 
 
 namespace UMClient.ViewModels
@@ -20,6 +26,23 @@ namespace UMClient.ViewModels
         private readonly ConfigurationService configService;
         private readonly SerialPortService serialPortService;
         private Timer? autoSendTimer;
+
+        public MainWindowViewModel()
+        {
+            configService = new ConfigurationService();
+            serialPortService = new SerialPortService();
+
+            serialPortService.DataReceived += OnDataReceived;
+            serialPortService.StatusChanged += OnStatusChanged;
+
+            InitializeDefaults();
+            LoadConfiguration();
+            LoadSendTemplates();
+            RefreshPorts();
+
+        }
+
+
 
         [ObservableProperty]
         private string title = "串口调试工具";
@@ -33,8 +56,11 @@ namespace UMClient.ViewModels
         [ObservableProperty]
         private bool isConnected = false;
 
+        //[ObservableProperty]
+        //private string receivedData = string.Empty;
+
         [ObservableProperty]
-        private string receivedData = string.Empty;
+        private ObservableCollection<ColoredTextItem> receivedMessages = new ObservableCollection<ColoredTextItem>();
 
         [ObservableProperty]
         private string sendData = string.Empty;
@@ -61,7 +87,13 @@ namespace UMClient.ViewModels
         private bool autoWrap = true;
 
         [ObservableProperty]
-        private bool showTimestamp = false;
+        private bool showTimestamp = true;
+
+        [ObservableProperty]
+        private bool autoScroll = true;
+
+        [ObservableProperty]
+        private bool saveLog = false;
 
         [ObservableProperty]
         private bool isDisplayPaused = false;
@@ -77,7 +109,7 @@ namespace UMClient.ViewModels
         private string selectedPortName = "COM1";
 
         [ObservableProperty]
-        private int selectedBaudRate = 9600;
+        private int selectedBaudRate = 115200;
 
         [ObservableProperty]
         private string selectedParity = "None";
@@ -89,27 +121,54 @@ namespace UMClient.ViewModels
         private string selectedStopBits = "One";
 
         [ObservableProperty]
+        private string selectedHandshake = "None";
+
+        [ObservableProperty]
         private string? selectedTemplate;
 
+        [ObservableProperty]
+        private string? selectedHistoryItem;
 
-        public ObservableCollection<string> SendTemplates { get; } = new();
-        public ObservableCollection<string> AvailablePorts { get; } = new();
 
-        public MainWindowViewModel()
+
+        public ObservableCollection<string> SendTemplates { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> AvailablePorts { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> SendHistory { get; } = new ObservableCollection<string>();
+
+        public ObservableCollection<string> ParityOptions { get; } = new ObservableCollection<string>()
         {
-            configService = new ConfigurationService();
-            serialPortService = new SerialPortService();
+            "None", "Odd", "Even", "Mark", "Space"
+        };
 
-            serialPortService.DataReceived += OnDataReceived;
-            serialPortService.StatusChanged += OnStatusChanged;
+        public ObservableCollection<int> DataBitsOptions { get; } = new ObservableCollection<int>() { 5, 6, 7, 8 };
 
-            LoadConfiguration();
-            LoadSendTemplates();
-            RefreshPorts();
+        public ObservableCollection<string> StopBitsOptions { get; } = new ObservableCollection<string>()
+        {
+            "One", "OnePointFive", "Two"
+        };
+
+        public ObservableCollection<string> HandshakeOptions { get; } = new ObservableCollection<string>()
+        {
+            "None", "XOnXOff", "RequestToSend", "RequestToSendXOnXOff"
+        };
+
+
+        private void InitializeDefaults()
+        {
+            // 设置默认的串口配置
+            SelectedBaudRate = 115200;
+            SelectedParity = "None";
+            SelectedDataBits = 8;
+            SelectedStopBits = "One";
+            SelectedHandshake = "None";
+            ShowTimestamp = true;
+            AutoWrap = true;
+            AutoScroll = true;
+            SendNewLine = true;
         }
 
         [RelayCommand]
-        private async Task ConnectAsync()
+        private async Task ConnectAsync()       //匹配 ConnectCommand 
         {
             try
             {
@@ -133,16 +192,16 @@ namespace UMClient.ViewModels
                         BaudRate = SelectedBaudRate,
                         Parity = Enum.Parse<Parity>(SelectedParity),
                         DataBits = SelectedDataBits,
-                        StopBits = Enum.Parse<StopBits>(SelectedStopBits)
+                        StopBits = Enum.Parse<StopBits>(SelectedStopBits),
+                        Handshake = Enum.Parse<Handshake>(SelectedHandshake)
                     };
 
                     var success = await serialPortService.ConnectAsync(config);
                     if (success)
                     {
                         IsConnected = true;
-                        StatusText = $"已连接到 {SelectedPortName}";
+                        StatusText = $"已连接到 {SelectedPortName} - {SelectedBaudRate}";
 
-                        // 启动自动发送定时器（如果启用）
                         if (IsAutoSendEnabled)
                         {
                             StartAutoSendTimer();
@@ -164,11 +223,14 @@ namespace UMClient.ViewModels
         private async Task SendDataAsync()
         {
             if (!IsConnected || string.IsNullOrEmpty(SendData))
+            {
                 return;
+            }
 
             try
             {
                 byte[] dataToSend;
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
 
                 if (IsHexSendMode)
                 {
@@ -188,7 +250,34 @@ namespace UMClient.ViewModels
 
                 await serialPortService.SendDataAsync(dataToSend);
                 SentCount++;
-                StatusText = $"发送: {SendData}";
+
+                // 添加到发送历史
+                AddToSendHistory(SendData);
+
+                // 在接收区显示发送的数据（带时间戳）
+                var displayText = IsHexSendMode ? ConvertBytesToHexString(dataToSend) : SendData;
+                var sendDisplayText = $"[{timestamp}] 发送: {displayText}";
+                if (!sendDisplayText.EndsWith(Environment.NewLine))
+                {
+                    sendDisplayText += Environment.NewLine;
+                }
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    ReceivedMessages.Add(new ColoredTextItem
+                    {
+                        Text = sendDisplayText,
+                        Foreground = Brushes.Yellow
+                    });
+
+                });
+
+                // 发送后清空发送框(除自动发送模式)
+                if (!IsAutoSendEnabled)
+                {
+                    SendData = string.Empty;
+                }
+                StatusText = $"发送成功 - 字节数: {dataToSend.Length}";
             }
             catch (Exception ex)
             {
@@ -197,32 +286,74 @@ namespace UMClient.ViewModels
         }
 
         [RelayCommand]
+        private void SetBaudRate(string baudRate)
+        {
+            if (int.TryParse(baudRate, out int rate))
+            {
+                SelectedBaudRate = rate;
+            }
+        }
+
+        [RelayCommand]
         private void RefreshPorts()
         {
             AvailablePorts.Clear();
             var ports = SerialPort.GetPortNames();
+
+            if (ports.Length == 0)
+            {
+                StatusText = "未检测到可用串口";
+                return;
+            }
+
             foreach (var port in ports.OrderBy(p => p))
             {
                 AvailablePorts.Add(port);
             }
 
+            // 如果当前选择的串口不在列表中，选择第一个可用的
             if (AvailablePorts.Count > 0 && !AvailablePorts.Contains(SelectedPortName))
             {
                 SelectedPortName = AvailablePorts[0];
+            }
+
+            StatusText = $"检测到 {AvailablePorts.Count} 个可用串口";
+        }
+
+        private void AddToSendHistory(string data)
+        {
+            if (string.IsNullOrWhiteSpace(data))
+                return;
+
+            // 移除重复项
+            if (SendHistory.Contains(data))
+            {
+                SendHistory.Remove(data);
+            }
+
+            // 添加到开头
+            SendHistory.Insert(0, data);
+
+            // 限制历史记录数量
+            while (SendHistory.Count > 20)
+            {
+                SendHistory.RemoveAt(SendHistory.Count - 1);
             }
         }
 
         [RelayCommand]
         private void ClearReceiveData()
         {
-            ReceivedData = string.Empty;
+            ReceivedMessages.Clear();
             ReceivedCount = 0;
+            StatusText = "接收区已清空";
         }
 
         [RelayCommand]
         private void ClearSendData()
         {
             SendData = string.Empty;
+            StatusText = "发送区已清空";
         }
 
         [RelayCommand]
@@ -230,19 +361,21 @@ namespace UMClient.ViewModels
         {
             ReceivedCount = 0;
             SentCount = 0;
+            StatusText = "计数器已清零";
         }
 
         [RelayCommand]
         private async Task CopyReceiveDataAsync()
         {
-            if (!string.IsNullOrEmpty(ReceivedData))
+            if (ReceivedMessages.Count > 0)
             {
                 try
                 {
                     var clipboard = GetClipboard();
                     if (clipboard != null)
                     {
-                        await clipboard.SetTextAsync(ReceivedData);
+                        string data = ReceivedMessages.Select(t => t.Text).Aggregate(ReceivedMessages.Count > 1 ? Environment.NewLine : "", (a, b) => a + b);
+                        await clipboard.SetTextAsync(data);
                         StatusText = "接收数据已复制到剪贴板";
                     }
                     else
@@ -282,8 +415,6 @@ namespace UMClient.ViewModels
             }
         }
 
-
-
         [RelayCommand]
         private void PauseDisplay()
         {
@@ -306,6 +437,14 @@ namespace UMClient.ViewModels
         }
 
         partial void OnSelectedTemplateChanged(string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                SendData = value;
+            }
+        }
+
+        partial void OnSelectedHistoryItemChanged(string? value)
         {
             if (!string.IsNullOrEmpty(value))
             {
@@ -347,26 +486,33 @@ namespace UMClient.ViewModels
 
         private void OnDataReceived(object? sender, byte[] data)
         {
-            if (IsDisplayPaused) return;
-
+            if (IsDisplayPaused)
+            {
+                return;
+            }
+            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var displayText = IsHexReceiveMode
                 ? ConvertBytesToHexString(data)
                 : Encoding.UTF8.GetString(data);
 
-            if (ShowTimestamp)
-            {
-                displayText = $"[{DateTime.Now:HH:mm:ss.fff}] {displayText}";
-            }
+            var finalText = $"[{timestamp}] 接收: {displayText}";
 
             // 在UI线程上更新
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                ReceivedData += displayText;
-                if (AutoWrap && !displayText.EndsWith(Environment.NewLine))
+                ReceivedMessages.Add(new ColoredTextItem
                 {
-                    ReceivedData += Environment.NewLine;
-                }
+                    Text = finalText,
+                    Foreground = Brushes.DarkGray
+                });
                 ReceivedCount++;
+
+                // 自动滚动到底部
+                if (AutoScroll && ReceivedMessages.Count > 500)
+                {
+                    ReceivedMessages.RemoveAt(0);
+                }
+
             });
         }
 
@@ -384,8 +530,9 @@ namespace UMClient.ViewModels
             hex = System.Text.RegularExpressions.Regex.Replace(hex, @"[^0-9A-Fa-f]", "");
 
             if (hex.Length % 2 != 0)
+            {
                 hex = "0" + hex; // 补齐偶数位
-
+            }
             var bytes = new byte[hex.Length / 2];
             for (int i = 0; i < bytes.Length; i++)
             {
@@ -402,13 +549,48 @@ namespace UMClient.ViewModels
         private void LoadConfiguration()
         {
             var config = configService.LoadConfiguration();
-            SelectedPortName = config.LastSerialPort;
-            SelectedBaudRate = config.LastBaudRate;
+
+            // 只有在配置文件中有值时才覆盖默认值
+            if (!string.IsNullOrEmpty(config.LastSerialPort))
+                SelectedPortName = config.LastSerialPort;
+
+            if (config.LastBaudRate > 0)
+                SelectedBaudRate = config.LastBaudRate;
+
+            if (!string.IsNullOrEmpty(config.LastParity))
+                SelectedParity = config.LastParity;
+
+            if (config.LastDataBits > 0)
+                SelectedDataBits = config.LastDataBits;
+
+            if (!string.IsNullOrEmpty(config.LastStopBits))
+                SelectedStopBits = config.LastStopBits;
+
+            if (!string.IsNullOrEmpty(config.LastHandshake))
+                SelectedHandshake = config.LastHandshake;
+
             IsHexReceiveMode = config.IsHexReceiveMode;
             IsHexSendMode = config.IsHexSendMode;
-            AutoSendInterval = config.AutoSendInterval;
+            AutoSendInterval = config.AutoSendInterval > 0 ? config.AutoSendInterval : 1000;
             IsAutoSendEnabled = config.IsAutoSendEnabled;
-            SendData = config.LastSendData;
+            ShowTimestamp = config.ShowTimestamp;
+            AutoWrap = config.AutoWrap;
+            AutoScroll = config.AutoScroll;
+            SendNewLine = config.SendNewLine;
+
+            if (!string.IsNullOrEmpty(config.LastSendData))
+            {
+                SendData = config.LastSendData;
+            }
+            // 加载发送历史
+            if (config.SendHistory != null)
+            {
+                SendHistory.Clear();
+                foreach (var item in config.SendHistory)
+                {
+                    SendHistory.Add(item);
+                }
+            }
         }
 
         private void LoadSendTemplates()
@@ -427,11 +609,20 @@ namespace UMClient.ViewModels
             {
                 LastSerialPort = SelectedPortName,
                 LastBaudRate = SelectedBaudRate,
+                LastParity = SelectedParity,
+                LastDataBits = SelectedDataBits,
+                LastStopBits = SelectedStopBits,
+                LastHandshake = SelectedHandshake,
                 IsHexReceiveMode = IsHexReceiveMode,
                 IsHexSendMode = IsHexSendMode,
                 AutoSendInterval = AutoSendInterval,
                 IsAutoSendEnabled = IsAutoSendEnabled,
-                LastSendData = SendData
+                ShowTimestamp = ShowTimestamp,
+                AutoWrap = AutoWrap,
+                AutoScroll = AutoScroll,
+                SendNewLine = SendNewLine,
+                LastSendData = SendData,
+                SendHistory = SendHistory.ToList()
             };
             configService.SaveConfiguration(config);
         }
@@ -443,6 +634,26 @@ namespace UMClient.ViewModels
                 return desktop.MainWindow?.Clipboard;
             }
             return null;
+        }
+
+        protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+        {
+            base.OnPropertyChanged(e);
+
+            // 当重要配置改变时自动保存
+            if (e.PropertyName == nameof(SelectedPortName) ||
+                e.PropertyName == nameof(SelectedBaudRate) ||
+                e.PropertyName == nameof(SelectedParity) ||
+                e.PropertyName == nameof(SelectedDataBits) ||
+                e.PropertyName == nameof(SelectedStopBits) ||
+                e.PropertyName == nameof(SelectedHandshake) ||
+                e.PropertyName == nameof(IsHexReceiveMode) ||
+                e.PropertyName == nameof(IsHexSendMode) ||
+                e.PropertyName == nameof(ShowTimestamp) ||
+                e.PropertyName == nameof(AutoWrap))
+            {
+                SaveConfiguration();
+            }
         }
 
     }
