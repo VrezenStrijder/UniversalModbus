@@ -13,6 +13,7 @@ using System.Collections.Specialized;
 using Avalonia.Animation.Easings;
 using Avalonia.Animation;
 using Avalonia.Styling;
+using System.Security.Cryptography;
 
 namespace UMClient.Controls
 {
@@ -107,6 +108,11 @@ namespace UMClient.Controls
                     scrollViewer.ScrollToEnd();
                 }, Avalonia.Threading.DispatcherPriority.Background);
             }
+        }
+
+        public void ScrollToTop()
+        {
+            scrollViewer?.ScrollToHome();
         }
 
         public void ScrollToEnd()
