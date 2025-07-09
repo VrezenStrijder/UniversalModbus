@@ -31,6 +31,9 @@ namespace UMClient.Models
 
         public List<string> SendHistory { get; set; } = new List<string>();
 
+        public bool IsCycleSend { get; set; } = false;
+        public int CycleSendCount { get; set; } = 5;
+
     }
 
 

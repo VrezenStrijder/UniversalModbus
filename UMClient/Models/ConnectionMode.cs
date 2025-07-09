@@ -15,5 +15,11 @@ namespace UMClient.Models
         UdpServer
     }
 
+    public class ConnectionModeOption
+    {
+        public string Display { get; set; } = string.Empty;
+        
+        public ConnectionMode Value { get; set; }
+    }
 
 }
