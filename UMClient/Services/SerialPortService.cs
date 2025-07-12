@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Linq;
 using System.Text;
@@ -39,10 +40,24 @@ namespace UMClient.Services
                 serialPort.DataReceived += OnSerialPortDataReceived;
                 serialPort.ErrorReceived += OnSerialPortErrorReceived;
 
+                // Linux上需要特殊处理权限问题
+                if (OperatingSystem.IsLinux())
+                {
+                    await CheckLinuxSerialPortPermissions(config.PortName);
+                }
+
                 await Task.Run(() => serialPort.Open());
 
                 StatusChanged?.Invoke(this, $"已连接到 {config.PortName}");
                 return true;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                var errorMessage = OperatingSystem.IsLinux()
+                    ? $"权限不足,请确保用户在dialout组中: {ex.Message}"
+                    : $"访问被拒绝: {ex.Message}";
+                StatusChanged?.Invoke(this, errorMessage);
+                return false;
             }
             catch (Exception ex)
             {
@@ -127,6 +142,47 @@ namespace UMClient.Services
         {
             StatusChanged?.Invoke(this, $"串口错误: {e.EventType}");
         }
+
+        /// <summary>
+        /// Linux上需要特殊处理权限问题
+        /// </summary>
+        /// <param name="portName">串口名称</param>
+        private async Task CheckLinuxSerialPortPermissions(string portName)
+        {
+            try
+            {
+                // 检查用户是否在dialout组中
+                var currentUser = Environment.UserName;
+
+                // 使用id命令检查用户组
+                var processInfo = new ProcessStartInfo
+                {
+                    FileName = "id",
+                    Arguments = "-Gn",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(processInfo);
+                if (process != null)
+                {
+                    await process.WaitForExitAsync();
+                    var output = await process.StandardOutput.ReadToEndAsync();
+
+                    if (!output.Contains("dialout") && !output.Contains("uucp"))
+                    {
+                        StatusChanged?.Invoke(this, "警告: 用户可能不在dialout组中,如果连接失败,请运行: sudo usermod -a -G dialout $USER");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"权限检查失败: {ex.Message}");
+            }
+        }
+
+
 
         public void Dispose()
         {
