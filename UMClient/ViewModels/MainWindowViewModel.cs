@@ -17,20 +17,50 @@ using System.ComponentModel;
 using System.Collections.Generic;
 using UMClient.Controls;
 using SukiUI.Models;
+using Avalonia.Controls;
+using Avalonia.Platform.Storage;
+using System.IO;
+using Avalonia.Threading;
 
 
 namespace UMClient.ViewModels
 {
     public partial class MainWindowViewModel : ViewModelBase
     {
+        private readonly QueryPortService queryPortService;
         private readonly ConfigurationService configService;
         private readonly SerialPortService serialPortService;
+        private readonly AutoSendService autoSendService;
         private Timer? autoSendTimer;
+
+        // 从导入文件自动定时发送
+        private List<string>? pendingSendLines;
+        private int currentSendLineIndex;
+        private DispatcherTimer? autoSendLinesTimer; // 使用DispatcherTimer, 以保证在UI线程中执行
+        // 循环发送
+        private DispatcherTimer? cycleSendTimer;
+
+
+
+        private static readonly Dictionary<string, SukiColorTheme> PredefinedThemes = new()
+        {
+            { "蓝色", new SukiColorTheme("Blue", Colors.Blue, Colors.LightBlue) },
+            { "紫色", new SukiColorTheme("Purple", Colors.Purple, Colors.Violet) },
+            { "粉色", new SukiColorTheme("Pink", Colors.DeepPink, Colors.Pink) },
+            { "红色", new SukiColorTheme("Red", Colors.Red, Colors.Crimson) },
+            { "橙色", new SukiColorTheme("Orange", Colors.Orange, Colors.DarkOrange) },
+            { "黄色", new SukiColorTheme("Yellow", Colors.Gold, Colors.Yellow) },
+            { "绿色", new SukiColorTheme("Green", Colors.Green, Colors.LimeGreen) },
+            { "青色", new SukiColorTheme("Cyan", Colors.Cyan, Colors.Turquoise) }
+        };
+
 
         public MainWindowViewModel()
         {
+            queryPortService = new QueryPortService();
             configService = new ConfigurationService();
             serialPortService = new SerialPortService();
+            autoSendService = new AutoSendService();
 
             serialPortService.DataReceived += OnDataReceived;
             serialPortService.StatusChanged += OnStatusChanged;
@@ -40,12 +70,67 @@ namespace UMClient.ViewModels
             LoadSendTemplates();
             RefreshPorts();
 
+            InitializeThemeOptions();
+            //SelectedTheme = ThemeOptions.First();
+
         }
+
+        public ObservableCollection<ThemeOption> ThemeOptions { get; } = new ObservableCollection<ThemeOption>();
+
+        private void InitializeThemeOptions()
+        {
+            ThemeOptions.Add(new ThemeOption { Display = "无 (默认)", Theme = null });
+
+            foreach (var theme in PredefinedThemes)
+            {
+                ThemeOptions.Add(new ThemeOption
+                {
+                    Display = theme.Key,
+                    Theme = theme.Value
+                });
+            }
+        }
+
+        //[ObservableProperty]
+        //private ThemeOption? selectedTheme;
+
+        //partial void OnSelectedThemeChanged(ThemeOption? value)
+        //{
+        //    if (value != null)
+        //    {
+        //        ApplyTheme(value.Theme);
+        //    }
+        //}
+
+        //private void ApplyTheme(SukiColorTheme? theme)
+        //{
+        //    if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        //    {
+        //        var mainWindow = desktop.MainWindow as Views.MainWindow;
+        //        if (mainWindow != null)
+        //        {
+        //            if (theme != null)
+        //            {
+        //                // 应用选定的主题
+        //                SukiUI.Helpers.SukiTheme.ChangeColorTheme(mainWindow, theme);
+        //            }
+        //            else
+        //            {
+        //                // 恢复默认主题 - 使用蓝色作为默认
+        //                var defaultTheme = new SukiColorTheme("Default", Colors.Blue, Colors.LightBlue);
+        //                SukiUI.Helpers.SukiTheme.ChangeColorTheme(mainWindow, defaultTheme);
+        //            }
+        //        }
+        //    }
+        //}
 
 
 
         [ObservableProperty]
         private string title = "串口调试工具";
+
+        [ObservableProperty]
+        private ConnectionModeOption? selectedConnectionModeOption;
 
         [ObservableProperty]
         private ConnectionMode selectedConnectionMode = ConnectionMode.SerialPort;
@@ -55,9 +140,6 @@ namespace UMClient.ViewModels
 
         [ObservableProperty]
         private bool isConnected = false;
-
-        //[ObservableProperty]
-        //private string receivedData = string.Empty;
 
         [ObservableProperty]
         private ObservableCollection<ColoredTextItem> receivedMessages = new ObservableCollection<ColoredTextItem>();
@@ -79,6 +161,15 @@ namespace UMClient.ViewModels
 
         [ObservableProperty]
         private bool isCycleSend = false;
+
+        [ObservableProperty]
+        private int cycleSendCount = 1; // 循环发送次数,0表示无限循环
+
+        [ObservableProperty]
+        private int currentCycleIndex = 0; // 当前循环次数
+
+        [ObservableProperty]
+        private bool isCycleSendRunning = false; // 是否正在循环发送
 
         [ObservableProperty]
         private bool sendNewLine = true;
@@ -153,6 +244,16 @@ namespace UMClient.ViewModels
         };
 
 
+        public ObservableCollection<ConnectionModeOption> ConnectionModeOptions { get; } = new ObservableCollection<ConnectionModeOption>()
+        {
+            new ConnectionModeOption() { Display = "串口", Value = ConnectionMode.SerialPort },
+            new ConnectionModeOption() { Display = "TCP客户端", Value = ConnectionMode.TcpClient },
+            new ConnectionModeOption() { Display = "TCP服务器", Value = ConnectionMode.TcpServer },
+            new ConnectionModeOption() { Display = "UDP客户端", Value = ConnectionMode.UdpClient },
+            new ConnectionModeOption() { Display = "UDP服务器", Value = ConnectionMode.UdpServer }
+        };
+
+
         private void InitializeDefaults()
         {
             // 设置默认的串口配置
@@ -165,7 +266,47 @@ namespace UMClient.ViewModels
             AutoWrap = true;
             AutoScroll = true;
             SendNewLine = true;
+
+            SelectedConnectionModeOption = ConnectionModeOptions.First(x => x.Value == ConnectionMode.SerialPort);
+
+            // Linux环境下执行额外初始化
+            if (OperatingSystem.IsLinux())
+            {
+                InitializeLinuxSpecific();
+            }
+
         }
+
+        /// <summary>
+        /// 初始化Linux环境
+        /// </summary>
+        private void InitializeLinuxSpecific()
+        {
+            try
+            {
+                // 设置Linux下的默认串口
+                if (File.Exists("/dev/ttyUSB0"))
+                {
+                    SelectedPortName = "/dev/ttyUSB0";
+                }
+                else if (File.Exists("/dev/ttyACM0"))
+                {
+                    SelectedPortName = "/dev/ttyACM0";
+                }
+                else if (File.Exists("/dev/ttyS0"))
+                {
+                    SelectedPortName = "/dev/ttyS0";
+                }
+
+                StatusText = "Linux环境已初始化";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Linux初始化警告: {ex.Message}";
+            }
+        }
+
+
 
         [RelayCommand]
         private async Task ConnectAsync()       //匹配 ConnectCommand 
@@ -174,6 +315,10 @@ namespace UMClient.ViewModels
             {
                 if (IsConnected)
                 {
+                    // 断开连接时停止发送
+                    StopAutoSendLines();
+                    StopCycleSend();
+
                     // 断开连接
                     await serialPortService.DisconnectAsync();
                     IsConnected = false;
@@ -222,24 +367,135 @@ namespace UMClient.ViewModels
         [RelayCommand]
         private async Task SendDataAsync()
         {
+            // 如果正在进行文件自动发送,先停止
+            if (autoSendLinesTimer != null)
+            {
+                StopAutoSendLines();
+                StatusText = "已停止文件自动发送";
+                return;
+            }
+
             if (!IsConnected || string.IsNullOrEmpty(SendData))
             {
                 return;
             }
 
+            // 如果启用了循环发送且不是正在循环中, 启动循环发送
+            if (IsCycleSend && !IsCycleSendRunning)
+            {
+                StartCycleSend();
+                return;
+            }
+
+            // 执行单次发送
+            await ExecuteSingleSend();
+        }
+
+        [RelayCommand]
+        private void ToggleCycleSend()
+        {
+            if (IsCycleSendRunning)
+            {
+                StopCycleSend();
+            }
+            else
+            {
+                StartCycleSend();
+            }
+        }
+
+
+        private void StartCycleSend()
+        {
+            if (!IsConnected || string.IsNullOrEmpty(SendData))
+            {
+                StatusText = "请先连接串口并输入发送数据";
+                return;
+            }
+
+            // 停止现有的循环发送
+            StopCycleSend();
+
+            IsCycleSendRunning = true;
+            CurrentCycleIndex = 0;
+
+            // 添加到发送历史
+            AddToSendHistory(SendData);
+
+            var intervalMs = Math.Max(AutoSendInterval, 100); // 最小间隔100ms
+
+            StatusText = $"开始循环发送, 间隔 {intervalMs}ms";
+
+            // 创建循环发送定时器
+            cycleSendTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(intervalMs)
+            };
+
+            cycleSendTimer.Tick += async (sender, e) => await ExecuteCycleSend();
+
+            // 立即发送第一次
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(50); // 短暂延迟确保UI更新
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    await ExecuteCycleSend();
+                    cycleSendTimer?.Start(); // 发送完第一次后启动定时器
+                });
+            });
+        }
+
+        private async Task ExecuteCycleSend()
+        {
+            if (!IsCycleSendRunning || !IsConnected)
+            {
+                StopCycleSend();
+                return;
+            }
+
+            // 检查是否达到循环次数限制
+            if (CycleSendCount > 0 && CurrentCycleIndex >= CycleSendCount)
+            {
+                StopCycleSend();
+                StatusText = $"循环发送完成,共发送 {CurrentCycleIndex} 次";
+                return;
+            }
+
+            try
+            {
+                await ExecuteSingleSend(false); // false表示不清空发送框
+                CurrentCycleIndex++;
+
+                // 更新状态
+                StatusText = $"循环发送中 - 字节数: {Encoding.UTF8.GetBytes(SendData).Length}";
+
+            }
+            catch (Exception ex)
+            {
+                StopCycleSend();
+                StatusText = $"循环发送出错: {ex.Message}";
+            }
+        }
+
+        private async Task ExecuteSingleSend(bool clearSendData = true)
+        {
+            if (!IsConnected || string.IsNullOrEmpty(SendData))
+            {
+                return;
+            }
             try
             {
                 byte[] dataToSend;
                 var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                var originalSendData = SendData; // 保存原始数据
 
                 if (IsHexSendMode)
                 {
-                    // 十六进制模式
                     dataToSend = ConvertHexStringToBytes(SendData);
                 }
                 else
                 {
-                    // 字符模式
                     var text = SendData;
                     if (SendNewLine)
                     {
@@ -251,12 +507,18 @@ namespace UMClient.ViewModels
                 await serialPortService.SendDataAsync(dataToSend);
                 SentCount++;
 
-                // 添加到发送历史
-                AddToSendHistory(SendData);
+                // 如果不是循环发送,添加到发送历史
+                if (!IsCycleSendRunning)
+                {
+                    AddToSendHistory(originalSendData);
+                }
 
-                // 在接收区显示发送的数据（带时间戳）
-                var displayText = IsHexSendMode ? ConvertBytesToHexString(dataToSend) : SendData;
-                var sendDisplayText = $"[{timestamp}] 发送: {displayText}";
+                // 在接收区显示发送的数据
+                var displayText = IsHexSendMode ? ConvertBytesToHexString(dataToSend) : originalSendData;
+                var sendDisplayText = ShowTimestamp
+                                    ? $"[{timestamp}] 发送: {displayText}"
+                                    : $"发送: {displayText}";
+
                 if (!sendDisplayText.EndsWith(Environment.NewLine))
                 {
                     sendDisplayText += Environment.NewLine;
@@ -272,18 +534,45 @@ namespace UMClient.ViewModels
 
                 });
 
-                // 发送后清空发送框(除自动发送模式)
-                if (!IsAutoSendEnabled)
+                // 根据参数决定是否清空发送框
+                if (clearSendData && !IsCycleSendRunning)
                 {
                     SendData = string.Empty;
                 }
-                StatusText = $"发送成功 - 字节数: {dataToSend.Length}";
+
+                if (!IsCycleSendRunning)
+                {
+                    StatusText = $"发送成功 - 字节数: {dataToSend.Length}";
+                }
             }
             catch (Exception ex)
             {
-                StatusText = $"发送错误: {ex.Message}";
+                if (!IsCycleSendRunning)
+                {
+                    StatusText = $"发送错误: {ex.Message}";
+                }
+                throw; // 重新抛出异常,让调用者处理
             }
         }
+
+        private void StopCycleSend()
+        {
+            cycleSendTimer?.Stop();
+            cycleSendTimer = null;
+
+            var wasRunning = IsCycleSendRunning;
+            IsCycleSendRunning = false;
+
+            if (wasRunning && CurrentCycleIndex > 0)
+            {
+                StatusText = $"循环发送已停止，共发送 {CurrentCycleIndex} 次";
+            }
+            else if (wasRunning)
+            {
+                StatusText = "循环发送已停止";
+            }
+        }
+
 
         [RelayCommand]
         private void SetBaudRate(string baudRate)
@@ -298,33 +587,56 @@ namespace UMClient.ViewModels
         private void RefreshPorts()
         {
             AvailablePorts.Clear();
-            var ports = SerialPort.GetPortNames();
 
-            if (ports.Length == 0)
+            try
             {
-                StatusText = "未检测到可用串口";
-                return;
-            }
+                List<string> ports = new List<string>();
 
-            foreach (var port in ports.OrderBy(p => p))
+                if (OperatingSystem.IsWindows())
+                {
+                    var windowsPorts = queryPortService.GetWindowsSerialPorts();
+                    ports.AddRange(windowsPorts);
+                }
+                else if (OperatingSystem.IsLinux())
+                {
+                    ports.AddRange(queryPortService.GetLinuxSerialPorts());
+                }
+                else if (OperatingSystem.IsMacOS())
+                {
+                    ports.AddRange(queryPortService.GetMacOSSerialPorts());
+                }
+
+                if (ports.Count == 0)
+                {
+                    StatusText = "未检测到可用串口";
+                    return;
+                }
+
+                foreach (var port in ports.OrderBy(p => p))
+                {
+                    AvailablePorts.Add(port);
+                }
+
+                // 如果当前选择的串口不在列表中，选择第一个可用的
+                if (AvailablePorts.Count > 0 && !AvailablePorts.Contains(SelectedPortName))
+                {
+                    SelectedPortName = AvailablePorts[0];
+                }
+
+                StatusText = $"检测到 {AvailablePorts.Count} 个可用串口";
+            }
+            catch (Exception ex)
             {
-                AvailablePorts.Add(port);
+                StatusText = $"枚举串口失败: {ex.Message}";
             }
-
-            // 如果当前选择的串口不在列表中，选择第一个可用的
-            if (AvailablePorts.Count > 0 && !AvailablePorts.Contains(SelectedPortName))
-            {
-                SelectedPortName = AvailablePorts[0];
-            }
-
-            StatusText = $"检测到 {AvailablePorts.Count} 个可用串口";
         }
 
         private void AddToSendHistory(string data)
         {
             if (string.IsNullOrWhiteSpace(data))
+            {
                 return;
-
+            }
             // 移除重复项
             if (SendHistory.Contains(data))
             {
@@ -425,15 +737,299 @@ namespace UMClient.ViewModels
         [RelayCommand]
         private async Task SaveToFileAsync()
         {
-            // 这里可以实现保存到文件的功能
-            StatusText = "保存功能待实现";
+            try
+            {
+                if (ReceivedMessages.Count == 0)
+                {
+                    StatusText = "没有数据可保存";
+                    return;
+                }
+
+                // 获取文件保存对话框
+                var topLevel = TopLevel.GetTopLevel(Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop ? desktop.MainWindow : null);
+
+                if (topLevel != null)
+                {
+                    var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                    {
+                        Title = "保存接收数据",
+                        DefaultExtension = "txt",
+                        SuggestedFileName = $"SerialData_{DateTime.Now:yyyyMMdd_HHmmss}.txt",
+                        FileTypeChoices = new[]
+                        {
+                            new FilePickerFileType("文本文件")
+                            {
+                                Patterns = new[] { "*.txt" }
+                            },
+                            new FilePickerFileType("日志文件")
+                            {
+                                Patterns = new[] { "*.log" }
+                            },
+                            new FilePickerFileType("所有文件")
+                            {
+                                Patterns = new[] { "*.*" }
+                            }
+                        }
+                    });
+
+                    if (file != null)
+                    {
+                        // 收集所有文本数据
+                        var allText = string.Join(Environment.NewLine, ReceivedMessages.Select(m => m.Text));
+
+                        // 写入文件
+                        await using var stream = await file.OpenWriteAsync();
+                        await using var writer = new StreamWriter(stream, Encoding.UTF8);
+                        await writer.WriteAsync(allText);
+
+                        StatusText = $"数据已保存到: {file.Name}";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"保存失败: {ex.Message}";
+            }
         }
+
+        #region 导入发送数据功能
+
+        [RelayCommand]
+        private void StopFileSending()
+        {
+            if (autoSendLinesTimer != null)
+            {
+                StopAutoSendLines();
+                StatusText = "文件自动发送已停止";
+            }
+            else
+            {
+                StatusText = "当前没有进行文件发送";
+            }
+        }
+
 
         [RelayCommand]
         private async Task ImportFromFileAsync()
         {
-            // 这里可以实现从文件导入的功能
-            StatusText = "导入功能待实现";
+            try
+            {
+                // 获取文件打开对话框
+                var topLevel = TopLevel.GetTopLevel(Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop ? desktop.MainWindow : null);
+
+                if (topLevel != null)
+                {
+                    var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                    {
+                        Title = "导入发送数据",
+                        AllowMultiple = false,
+                        FileTypeFilter = new[]
+                        {
+                            new FilePickerFileType("文本文件")
+                            {
+                                Patterns = new[] { "*.txt" }
+                            },
+                            new FilePickerFileType("日志文件")
+                            {
+                                Patterns = new[] { "*.log" }
+                            },
+                            new FilePickerFileType("所有文件")
+                            {
+                                Patterns = new[] { "*.*" }
+                            }
+                        }
+                    });
+
+                    if (files.Count > 0)
+                    {
+                        var file = files[0];
+
+                        // 读取文件内容
+                        await using var stream = await file.OpenReadAsync();
+                        using var reader = new StreamReader(stream, Encoding.UTF8);
+                        var content = await reader.ReadToEndAsync();
+
+                        if (!string.IsNullOrEmpty(content))
+                        {
+                            var ret = await autoSendService.ProcessImportedContent(content, file.Name, IsConnected);
+                            // 自动发送模式
+                            if (ret.ImportOption == ImportOption.AutoSend)
+                            {
+                                await StartAutoSendLines(ret.SendLines);
+                            }
+                            // 其他模式
+                            else
+                            {
+                                SendData = ret.SendData;
+                                StatusText = ret.StatusText;
+                            }
+                        }
+                        else
+                        {
+                            StatusText = "文件内容为空";
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"导入失败: {ex.Message}";
+            }
+        }
+
+        private async Task StartAutoSendLines(List<string> lines)
+        {
+            if (!IsConnected)
+            {
+                StatusText = "请先连接串口";
+                return;
+            }
+
+            // 停止现有的自动发送
+            StopAutoSendLines();
+
+            pendingSendLines = lines;
+            currentSendLineIndex = 0;
+
+            // 启用自动发送,设置合适的间隔
+            IsAutoSendEnabled = true;
+            if (AutoSendInterval < 1000)
+            {
+                AutoSendInterval = 1000;
+            }
+
+            StatusText = $"开始自动发送 {lines.Count} 行数据,间隔 {AutoSendInterval}ms";
+
+            autoSendLinesTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(AutoSendInterval)
+            };
+            autoSendLinesTimer.Tick += async (sender, e) => await SendNextLineFromFile();
+            autoSendLinesTimer.Start();
+        }
+
+        private async Task SendNextLineFromFile()
+        {
+            if (pendingSendLines == null || currentSendLineIndex >= pendingSendLines.Count)
+            {
+                // 发送完成
+                StopAutoSendLines();
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = $"文件内容发送完成";
+                });
+                return;
+            }
+
+            if (!IsConnected)
+            {
+                // 连接断开,停止发送
+                StopAutoSendLines();
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = "连接断开,自动发送已停止";
+                });
+                return;
+            }
+
+            try
+            {
+                var lineToSend = pendingSendLines[currentSendLineIndex];
+
+                // 在UI线程上更新发送框内容（可选）
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    SendData = lineToSend;
+                    StatusText = $"正在发送第 {currentSendLineIndex + 1}/{pendingSendLines.Count} 行";
+                });
+
+                // 发送数据
+                byte[] dataToSend;
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+
+                if (IsHexSendMode)
+                {
+                    dataToSend = ConvertHexStringToBytes(lineToSend);
+                }
+                else
+                {
+                    var text = lineToSend;
+                    if (SendNewLine)
+                    {
+                        text += Environment.NewLine;
+                    }
+                    dataToSend = Encoding.UTF8.GetBytes(text);
+                }
+
+                await serialPortService.SendDataAsync(dataToSend);
+
+                // 更新计数器
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    SentCount++;
+
+                    // 在接收区显示发送的数据
+                    var displayText = IsHexSendMode ? ConvertBytesToHexString(dataToSend) : lineToSend;
+                    var sendDisplayText = ShowTimestamp
+                        ? $"[{timestamp}] 发送: {displayText}"
+                        : $"发送: {displayText}";
+
+                    ReceivedMessages.Add(new ColoredTextItem
+                    {
+                        Text = sendDisplayText,
+                        Foreground = Brushes.Yellow
+                    });
+                });
+
+                currentSendLineIndex++;
+            }
+            catch (Exception ex)
+            {
+                StopAutoSendLines();
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = $"发送第 {currentSendLineIndex + 1} 行时出错: {ex.Message}";
+                });
+            }
+        }
+
+        private void StopAutoSendLines()
+        {
+            autoSendLinesTimer?.Stop();
+            autoSendLinesTimer = null;
+            pendingSendLines = null;
+            currentSendLineIndex = 0;
+        }
+
+
+        #endregion
+
+        [RelayCommand]
+        private void ScrollToTop()
+        {
+            // 通过引用获取控件并滚动到顶部
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                var mainWindow = desktop.MainWindow as Views.MainWindow;
+                var coloredTextDisplay = mainWindow?.FindControl<ColoredTextDisplay>("ReceiveDisplay");
+
+                coloredTextDisplay?.ScrollToTop();
+            }
+        }
+
+        [RelayCommand]
+        private void ScrollToBottom()
+        {
+            // 滚动到底部
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                var mainWindow = desktop.MainWindow as Views.MainWindow;
+                var coloredTextDisplay = mainWindow?.FindControl<ColoredTextDisplay>("ReceiveDisplay");
+                coloredTextDisplay?.ScrollToEnd();
+            }
         }
 
         partial void OnSelectedTemplateChanged(string? value)
@@ -454,7 +1050,8 @@ namespace UMClient.ViewModels
 
         partial void OnIsAutoSendEnabledChanged(bool value)
         {
-            if (IsConnected)
+            // 如果是导入文件发送模式, 则不启动自动发送
+            if (IsConnected && pendingSendLines == null)
             {
                 if (value)
                 {
@@ -470,6 +1067,12 @@ namespace UMClient.ViewModels
 
         partial void OnAutoSendIntervalChanged(int value)
         {
+            // 如果正在循环发送,更新定时器间隔
+            if (IsCycleSendRunning && cycleSendTimer != null)
+            {
+                cycleSendTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(value, 100));
+            }
+
             if (IsAutoSendEnabled && IsConnected)
             {
                 StartAutoSendTimer();
@@ -495,7 +1098,9 @@ namespace UMClient.ViewModels
                 ? ConvertBytesToHexString(data)
                 : Encoding.UTF8.GetString(data);
 
-            var finalText = $"[{timestamp}] 接收: {displayText}";
+            var finalText = ShowTimestamp
+                           ? $"[{timestamp}] 接收: {displayText}"
+                           : $"接收: {displayText}";
 
             // 在UI线程上更新
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -508,7 +1113,7 @@ namespace UMClient.ViewModels
                 ReceivedCount++;
 
                 // 自动滚动到底部
-                if (AutoScroll && ReceivedMessages.Count > 500)
+                if (AutoScroll && ReceivedMessages.Count > 1000)
                 {
                     ReceivedMessages.RemoveAt(0);
                 }
@@ -577,6 +1182,11 @@ namespace UMClient.ViewModels
             AutoWrap = config.AutoWrap;
             AutoScroll = config.AutoScroll;
             SendNewLine = config.SendNewLine;
+            IsCycleSend = config.IsCycleSend;
+            CycleSendCount = config.CycleSendCount;
+
+            SelectedConnectionModeOption = ConnectionModeOptions.FirstOrDefault(x => x.Value == config.LastConnectionMode) ?? ConnectionModeOptions.First();
+
 
             if (!string.IsNullOrEmpty(config.LastSendData))
             {
@@ -607,6 +1217,7 @@ namespace UMClient.ViewModels
         {
             var config = new AppConfiguration
             {
+                LastConnectionMode = SelectedConnectionMode,
                 LastSerialPort = SelectedPortName,
                 LastBaudRate = SelectedBaudRate,
                 LastParity = SelectedParity,
@@ -622,7 +1233,10 @@ namespace UMClient.ViewModels
                 AutoScroll = AutoScroll,
                 SendNewLine = SendNewLine,
                 LastSendData = SendData,
-                SendHistory = SendHistory.ToList()
+                SendHistory = SendHistory.ToList(),
+                IsCycleSend = IsCycleSend,
+                CycleSendCount = CycleSendCount
+
             };
             configService.SaveConfiguration(config);
         }
@@ -653,6 +1267,22 @@ namespace UMClient.ViewModels
                 e.PropertyName == nameof(AutoWrap))
             {
                 SaveConfiguration();
+            }
+        }
+
+        partial void OnSelectedConnectionModeOptionChanged(ConnectionModeOption? value)
+        {
+            if (value != null)
+            {
+                SelectedConnectionMode = value.Value;
+            }
+        }
+
+        partial void OnIsCycleSendChanged(bool value)
+        {
+            if (!value && IsCycleSendRunning)
+            {
+                StopCycleSend();
             }
         }
 
