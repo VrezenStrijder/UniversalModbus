@@ -14,6 +14,22 @@
         Title="{Binding Title}"
 		Opacity="0.9">
 
+	<!--<suki:SukiWindow.RightWindowTitleBarControls>
+        <StackPanel Orientation="Horizontal" Spacing="10" Margin="10,0">
+            <TextBlock Text="主题:" VerticalAlignment="Center" Foreground="White"/>
+            <ComboBox SelectedItem="{Binding SelectedTheme}" 
+                     ItemsSource="{Binding ThemeOptions}" 
+                     Width="120" Height="30"
+                     VerticalAlignment="Center">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Display}"/>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+        </StackPanel>
+    </suki:SukiWindow.RightWindowTitleBarControls>-->
+
 	<Design.DataContext>
 		<!-- This only sets the DataContext for the previewer in an IDE,
              to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
@@ -39,13 +55,29 @@
 		</Menu>
 
 		<!-- 底部状态栏 -->
-		<Border DockPanel.Dock="Bottom" Background="{DynamicResource SukiCardBackground}"
-			   BorderBrush="{DynamicResource SukiBorderBrush}" BorderThickness="0,1,0,0">
+		<Border DockPanel.Dock="Bottom" Background="{DynamicResource SukiCardBackground}" BorderBrush="{DynamicResource SukiBorderBrush}" BorderThickness="0,1,0,0">
 			<Grid ColumnDefinitions="*,Auto,Auto,Auto">
+				<!-- 主状态文本 -->
 				<TextBlock Grid.Column="0" Text="{Binding StatusText}" VerticalAlignment="Center" Margin="10,5"/>
-				<TextBlock Grid.Column="1" Text="{Binding ReceivedCount, StringFormat='接收: {0}'}" VerticalAlignment="Center" Margin="10,5"/>
-				<TextBlock Grid.Column="2" Text="{Binding SentCount, StringFormat='发送: {0}'}" VerticalAlignment="Center" Margin="10,5"/>
-				<TextBlock Grid.Column="3" Text="欢迎使用串口调试工具" VerticalAlignment="Center" Margin="10,5"/>
+
+				<!-- 循环状态显示 -->
+				<StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,5" IsVisible="{Binding IsCycleSendRunning}">
+					<TextBlock Text="循环发送: " Foreground="Orange" FontWeight="Bold"/>
+					<TextBlock Foreground="Orange" FontWeight="Bold">
+						<TextBlock.Text>
+							<MultiBinding StringFormat="{}{0}/{1}">
+								<Binding Path="CurrentCycleIndex"/>
+								<Binding Path="CycleSendCount" Converter="{x:Static converters:CycleSendCountDisplayConverter.Instance}"/>
+							</MultiBinding>
+						</TextBlock.Text>
+					</TextBlock>
+				</StackPanel>
+
+				<!-- 接收计数 -->
+				<TextBlock Grid.Column="2" Text="{Binding ReceivedCount, StringFormat='接收: {0}'}" VerticalAlignment="Center" Margin="10,5"/>
+
+				<!-- 发送计数 -->
+				<TextBlock Grid.Column="3" Text="{Binding SentCount, StringFormat='发送: {0}'}" VerticalAlignment="Center" Margin="10,5"/>
 			</Grid>
 		</Border>
 
@@ -59,13 +91,14 @@
 						<!-- 连接模式选择 -->
 						<StackPanel>
 							<TextBlock Text="连接模式:" FontWeight="Bold" Margin="0,0,0,5"/>
-							<ComboBox SelectedItem="{Binding SelectedConnectionMode}" HorizontalAlignment="Stretch">
-								<ComboBoxItem Content="串口" Tag="SerialPort"/>
-								<ComboBoxItem Content="TCP客户端" Tag="TcpClient"/>
-								<ComboBoxItem Content="TCP服务器" Tag="TcpServer"/>
-								<ComboBoxItem Content="UDP客户端" Tag="UdpClient"/>
-								<ComboBoxItem Content="UDP服务器" Tag="UdpServer"/>
+							<ComboBox SelectedItem="{Binding SelectedConnectionModeOption}" ItemsSource="{Binding ConnectionModeOptions}" HorizontalAlignment="Stretch">
+								<ComboBox.ItemTemplate>
+									<DataTemplate>
+										<TextBlock Text="{Binding Display}"/>
+									</DataTemplate>
+								</ComboBox.ItemTemplate>
 							</ComboBox>
+
 						</StackPanel>
 
 						<!-- 串口配置 -->
@@ -149,67 +182,114 @@
 			</suki:GroupBox>
 
 			<!-- 右侧数据显示和发送区域 -->
-			<Grid Grid.Column="1" RowDefinitions="280,Auto,*" Margin="10">
+				<ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"						 Margin="10">
+					<StackPanel Spacing="5">
+						
+						<!-- 发送数据区 (上部) -->
+						<suki:GroupBox Grid.Row="0" Header="发送数据" MinHeight="280">
+							<Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10">
 
-				<!-- 发送数据区 (上部) -->
-				<suki:GroupBox Grid.Row="0" Header="发送数据">
-					<Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10">
+								<!-- 发送模式和选项 -->
+								<Grid Grid.Row="0" ColumnDefinitions="*,*,1.2*" Margin="0,0,0,10">
+									<StackPanel Grid.Column="0" Margin="0,0,10,0">
+										<TextBlock Text="发送模式:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<StackPanel Orientation="Horizontal" Spacing="15">
+											<RadioButton Content="十六进制" IsChecked="{Binding IsHexSendMode}"/>
+											<RadioButton Content="字符模式" IsChecked="{Binding !IsHexSendMode}"/>
+										</StackPanel>
+									</StackPanel>
 
-						<!-- 发送模式和选项 -->
-						<Grid Grid.Row="0" ColumnDefinitions="*,*,*" Margin="0,0,0,10">
-							<StackPanel Grid.Column="0" Margin="0,0,10,0">
-								<TextBlock Text="发送模式:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<StackPanel Orientation="Horizontal" Spacing="15">
-									<RadioButton Content="十六进制" IsChecked="{Binding IsHexSendMode}"/>
-									<RadioButton Content="字符模式" IsChecked="{Binding !IsHexSendMode}"/>
-								</StackPanel>
-							</StackPanel>
+									<StackPanel Grid.Column="1" Margin="0,0,10,0">
+										<TextBlock Text="定时发送:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<StackPanel Orientation="Horizontal" Spacing="8">
+											<CheckBox IsChecked="{Binding IsAutoSendEnabled}" Content="启用" VerticalAlignment="Center"/>
+											<NumericUpDown Value="{Binding AutoSendInterval}" Minimum="100" Maximum="60000" Width="100" Height="28" VerticalAlignment="Center"/>
+											<TextBlock Text="ms" VerticalAlignment="Center"/>
+										</StackPanel>
+									</StackPanel>
 
-							<StackPanel Grid.Column="1" Margin="0,0,10,0">
-								<TextBlock Text="定时发送:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<StackPanel Orientation="Horizontal" Spacing="8">
-									<CheckBox IsChecked="{Binding IsAutoSendEnabled}" Content="启用" VerticalAlignment="Center"/>
-									<NumericUpDown Value="{Binding AutoSendInterval}" Minimum="100" Maximum="60000" Width="100" Height="30" VerticalAlignment="Center"/>
-									<TextBlock Text="ms" VerticalAlignment="Center"/>
-								</StackPanel>
-							</StackPanel>
+									<StackPanel Grid.Column="2">
+										<TextBlock Text="发送选项:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<StackPanel Spacing="3">
+											<!-- 循环发送选项 -->
+											<StackPanel Orientation="Horizontal" Spacing="5">
+												<CheckBox Content="循环" IsChecked="{Binding IsCycleSend}" VerticalAlignment="Center"/>
+												<NumericUpDown Value="{Binding CycleSendCount}" Minimum="0" Maximum="9999" Width="80" Height="28" VerticalAlignment="Center" IsEnabled="{Binding IsCycleSend}"/>
+												<TextBlock Text="次" VerticalAlignment="Center" FontSize="11"/>
+												<CheckBox Content="发送新行" IsChecked="{Binding SendNewLine}" Margin="8,0" />
+											</StackPanel>
+										</StackPanel>
+									</StackPanel>
+								</Grid>
 
-							<StackPanel Grid.Column="2">
-								<TextBlock Text="发送选项:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<StackPanel Orientation="Horizontal" Spacing="15">
-									<CheckBox Content="循环发送" IsChecked="{Binding IsCycleSend}"/>
-									<CheckBox Content="发送新行" IsChecked="{Binding SendNewLine}"/>
-								</StackPanel>
-							</StackPanel>
-						</Grid>
+								<!-- 发送历史和模板 -->
+								<Grid Grid.Row="1" ColumnDefinitions="*,120" Margin="0,0,0,10">
+									<StackPanel Grid.Column="0" Margin="0,0,10,0">
+										<TextBlock Text="发送历史:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<ComboBox SelectedItem="{Binding SelectedHistoryItem}" ItemsSource="{Binding SendHistory}" PlaceholderText="选择历史记录" Height="32">
+											<ComboBox.ItemTemplate>
+												<DataTemplate>
+													<TextBlock Text="{Binding}" MaxWidth="200" TextTrimming="CharacterEllipsis"/>
+												</DataTemplate>
+											</ComboBox.ItemTemplate>
+										</ComboBox>
+									</StackPanel>
 
-						<!-- 发送历史和模板 -->
-						<Grid Grid.Row="1" ColumnDefinitions="*,120" Margin="0,0,0,10">
-							<StackPanel Grid.Column="0" Margin="0,0,10,0">
-								<TextBlock Text="发送历史:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<ComboBox SelectedItem="{Binding SelectedHistoryItem}" ItemsSource="{Binding SendHistory}" PlaceholderText="选择历史记录" Height="32">
-									<ComboBox.ItemTemplate>
-										<DataTemplate>
-											<TextBlock Text="{Binding}" MaxWidth="200" TextTrimming="CharacterEllipsis"/>
-										</DataTemplate>
-									</ComboBox.ItemTemplate>
-								</ComboBox>
-							</StackPanel>
+									<StackPanel Grid.Column="1">
+										<TextBlock Text="发送模板:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<ComboBox SelectedItem="{Binding SelectedTemplate}" ItemsSource="{Binding SendTemplates}" PlaceholderText="选择模板" Height="32">
+											<ComboBox.ItemTemplate>
+												<DataTemplate>
+													<TextBlock Text="{Binding}" MaxWidth="100" TextTrimming="CharacterEllipsis"/>
+												</DataTemplate>
+											</ComboBox.ItemTemplate>
+										</ComboBox>
+									</StackPanel>
+								</Grid>
 
-							<StackPanel Grid.Column="1">
-								<TextBlock Text="发送模板:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<ComboBox SelectedItem="{Binding SelectedTemplate}" ItemsSource="{Binding SendTemplates}" PlaceholderText="选择模板" Height="32">
-									<ComboBox.ItemTemplate>
-										<DataTemplate>
-											<TextBlock Text="{Binding}" MaxWidth="100" TextTrimming="CharacterEllipsis"/>
-										</DataTemplate>
-									</ComboBox.ItemTemplate>
-								</ComboBox>
-							</StackPanel>
-						</Grid>
+								<!-- 发送输入框和按钮 -->
+								<Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,0,0,10" MinHeight="100">
+									<TextBox Grid.Column="0" Text="{Binding SendData}" Watermark="请输入要发送的数据" Margin="0,0,10,0" TextWrapping="Wrap"
+											 AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
 
-						<!-- 发送输入框和按钮 -->
-						<Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+									<!-- 发送按钮区域 -->
+									<StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
+										<!-- 主发送按钮 -->
+										<Button Content="发送" Command="{Binding SendDataCommand}"
+											   Width="80" Height="40">
+											<Button.Styles>
+												<Style Selector="Button">
+													<Setter Property="Background" Value="DodgerBlue"/>
+												</Style>
+												<Style Selector="Button TextBlock">
+													<Setter Property="Foreground" Value="White"/>
+												</Style>
+											</Button.Styles>
+										</Button>
+
+										<!-- 循环发送控制按钮 -->
+										<Button Command="{Binding ToggleCycleSendCommand}" Width="120" Height="40" IsVisible="{Binding IsCycleSend}">
+											<Button.Content>
+												<TextBlock Text="{Binding IsCycleSendRunning, Converter={x:Static converters:BooleanToStringConverter.Instance}, ConverterParameter='停止循环|开始循环'}" TextAlignment="Center"/>
+											</Button.Content>
+											<Button.Styles>
+												<Style Selector="Button">
+													<Setter Property="Background" Value="Orange"/>
+												</Style>
+												<Style Selector="Button TextBlock">
+													<Setter Property="Foreground" Value="White"/>
+												</Style>
+												<Style Selector="Button:pressed">
+													<Setter Property="Background" Value="Red"/>
+												</Style>
+											</Button.Styles>
+										</Button>
+									</StackPanel>
+								</Grid>
+
+
+								<!-- 发送输入框和按钮 -->
+								<!--<Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
 							<TextBox Grid.Column="0" Text="{Binding SendData}" Watermark="请输入要发送的数据" Margin="0,0,10,0" TextWrapping="Wrap" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
 							<Button Grid.Column="1" Content="发送" Command="{Binding SendDataCommand}" Width="80" Height="40" VerticalAlignment="Top">
 								<Button.Content>
@@ -224,73 +304,74 @@
 									</Style>
 								</Button.Styles>
 							</Button>
-						</Grid>
+						</Grid>-->
 
-						<!-- 发送区按钮 -->
-						<StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-							<Button Content="复制发送数据" Command="{Binding CopySendDataCommand}" Height="36"/>
-							<Button Content="清空发送区" Command="{Binding ClearSendDataCommand}" Height="36"/>
-							<Button Content="清空计数器" Command="{Binding ClearCounterCommand}" Height="36"/>
-							<Button Content="从文件导入" Command="{Binding ImportFromFileCommand}" Height="36"/>
-						</StackPanel>
-					</Grid>
-				</suki:GroupBox>
-
-				<!-- 分隔线 -->
-				<GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Rows"/>
-
-				<!-- 接收数据显示区 (下部) -->
-				<suki:GroupBox Grid.Row="2" Header="接收数据">
-					<Grid RowDefinitions="Auto,260,Auto" Margin="10">
-						<!-- 接收模式 -->
-						<Grid Grid.Row="0" ColumnDefinitions="*,*,*" Margin="0,0,0,10">
-							<StackPanel Grid.Column="0" Margin="0,0,10,0">
-								<TextBlock Text="接收模式:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<StackPanel Orientation="Horizontal" Spacing="15">
-									<RadioButton Content="十六进制" IsChecked="{Binding IsHexReceiveMode}"/>
-									<RadioButton Content="字符模式" IsChecked="{Binding !IsHexReceiveMode}"/>
+								<!-- 发送区按钮 -->
+								<StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+									<Button Content="复制发送数据" Command="{Binding CopySendDataCommand}" Height="36"/>
+									<Button Content="清空发送区" Command="{Binding ClearSendDataCommand}" Height="36"/>
+									<Button Content="清空计数器" Command="{Binding ClearCounterCommand}" Height="36"/>
+									<Button Content="从文件导入" Command="{Binding ImportFromFileCommand}" Height="36"/>
 								</StackPanel>
-							</StackPanel>
+							</Grid>
+						</suki:GroupBox>
 
-							<StackPanel Grid.Column="1" Margin="0,0,10,0">
-								<TextBlock Text="显示选项:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<StackPanel Orientation="Horizontal" Spacing="15">
-									<CheckBox Content="自动换行" IsChecked="{Binding AutoWrap}"/>
-									<CheckBox Content="显示时间戳" IsChecked="{Binding ShowTimestamp}"/>
-								</StackPanel>
-							</StackPanel>
+						<!-- 分隔线 -->
+						<GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Rows"/>
 
-							<StackPanel Grid.Column="2">
-								<TextBlock Text="其他选项:" FontWeight="Bold" Margin="0,0,0,5"/>
-								<StackPanel Orientation="Horizontal" Spacing="15">
-									<CheckBox Content="自动滚动" IsChecked="{Binding AutoScroll}"/>
-									<CheckBox Content="保存日志" IsChecked="{Binding SaveLog}"/>
-								</StackPanel>
-							</StackPanel>
-						</Grid>
+						<!-- 接收数据显示区 (下部) -->
+						<suki:GroupBox Grid.Row="2" Header="接收数据" MinHeight="400">
+							<Grid RowDefinitions="Auto,260,Auto" Margin="10">
+								<!-- 接收模式 -->
+								<Grid Grid.Row="0" ColumnDefinitions="*,*,*" Margin="0,0,0,10">
+									<StackPanel Grid.Column="0" Margin="0,0,10,0">
+										<TextBlock Text="接收模式:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<StackPanel Orientation="Horizontal" Spacing="15">
+											<RadioButton Content="十六进制" IsChecked="{Binding IsHexReceiveMode}"/>
+											<RadioButton Content="字符模式" IsChecked="{Binding !IsHexReceiveMode}"/>
+										</StackPanel>
+									</StackPanel>
 
-						<!-- 接收数据显示 -->
-						<!--<TextBox Grid.Row="1" Text="{Binding ReceivedData}" IsReadOnly="True" TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto"
+									<StackPanel Grid.Column="1" Margin="0,0,10,0">
+										<TextBlock Text="显示选项:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<StackPanel Orientation="Horizontal" Spacing="15">
+											<CheckBox Content="自动换行" IsChecked="{Binding AutoWrap}"/>
+											<CheckBox Content="显示时间戳" IsChecked="{Binding ShowTimestamp}"/>
+										</StackPanel>
+									</StackPanel>
+
+									<StackPanel Grid.Column="2">
+										<TextBlock Text="其他选项:" FontWeight="Bold" Margin="0,0,0,5"/>
+										<StackPanel Orientation="Horizontal" Spacing="15">
+											<CheckBox Content="自动滚动" IsChecked="{Binding AutoScroll}"/>
+											<CheckBox Content="保存日志" IsChecked="{Binding SaveLog}"/>
+										</StackPanel>
+									</StackPanel>
+								</Grid>
+
+								<!-- 接收数据显示 -->
+								<!--<TextBox Grid.Row="1" Text="{Binding ReceivedData}" IsReadOnly="True" TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto"
 								FontFamily="Consolas" Background="WhiteSmoke" Foreground="DarkGray" Margin="0,0,0,10" AcceptsReturn="True"/>-->
-						
-						<controls:ColoredTextDisplay Grid.Row="1" Items="{Binding ReceivedMessages}" AutoScroll="{Binding AutoScroll}" Margin="0,0,0,10" Background="Black"/>
+
+								<controls:ColoredTextDisplay Grid.Row="1" Items="{Binding ReceivedMessages}" AutoScroll="{Binding AutoScroll}" Margin="0,0,0,10" Background="Black"/>
 
 
-						<!-- 接收区按钮 -->
-						<StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-							<Button Content="复制接收数据" Command="{Binding CopyReceiveDataCommand}" Height="36"/>
-							<Button Content="清空接收区" Command="{Binding ClearReceiveDataCommand}" Height="36"/>
-							<Button Command="{Binding PauseDisplayCommand}" Height="36">
-								<Button.Content>
-									<TextBlock Text="{Binding IsDisplayPaused, Converter={x:Static converters:BooleanToStringConverter.Instance}, ConverterParameter='继续显示|暂停显示'}"/>
-								</Button.Content>
-							</Button>
-							<Button Content="保存到文件" Command="{Binding SaveToFileCommand}" Height="36"/>
-						</StackPanel>
-					</Grid>
-				</suki:GroupBox>
+								<!-- 接收区按钮 -->
+								<StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+									<Button Content="复制接收数据" Command="{Binding CopyReceiveDataCommand}" Height="36"/>
+									<Button Content="清空接收区" Command="{Binding ClearReceiveDataCommand}" Height="36"/>
+									<Button Command="{Binding PauseDisplayCommand}" Height="36">
+										<Button.Content>
+											<TextBlock Text="{Binding IsDisplayPaused, Converter={x:Static converters:BooleanToStringConverter.Instance}, ConverterParameter='继续显示|暂停显示'}"/>
+										</Button.Content>
+									</Button>
+									<Button Content="保存到文件" Command="{Binding SaveToFileCommand}" Height="36"/>
+								</StackPanel>
+							</Grid>
+						</suki:GroupBox>
+					</StackPanel>
 
-			</Grid>
+				</ScrollViewer>
 		</Grid>
 	</DockPanel>
 

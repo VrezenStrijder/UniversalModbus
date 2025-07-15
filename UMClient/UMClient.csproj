@@ -6,6 +6,8 @@
 		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+		<!-- 支持多平台 -->
+		<RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -16,6 +18,11 @@
 	  <Compile Remove="Models\ComboBoxOption.cs" />
 	</ItemGroup>
 
+	<!-- Linux特定配置 -->
+	<ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+		<PackageReference Include="System.IO.Ports" Version="8.0.0" />
+	</ItemGroup>
+	
 	<ItemGroup>
 		<PackageReference Include="Avalonia" Version="11.2.1" />
 		<PackageReference Include="Avalonia.AvaloniaEdit" Version="11.3.0" />
