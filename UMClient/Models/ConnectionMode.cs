@@ -9,16 +9,16 @@ namespace UMClient.Models
     public enum ConnectionMode
     {
         SerialPort,
-        TcpClient,
         TcpServer,
-        UdpClient,
-        UdpServer
+        TcpClient,
+        UdpServer,
+        UdpClient
     }
 
     public class ConnectionModeOption
     {
         public string Display { get; set; } = string.Empty;
-        
+
         public ConnectionMode Value { get; set; }
     }
 
