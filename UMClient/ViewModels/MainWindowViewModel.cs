@@ -1,36 +1,40 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO;
 using System.IO.Ports;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using SukiUI.Models;
+using UMClient.Controls;
 using UMClient.Models;
 using UMClient.Services;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia;
-using Avalonia.Controls.Documents;
-using Avalonia.Media;
-using System.ComponentModel;
-using System.Collections.Generic;
-using UMClient.Controls;
-using SukiUI.Models;
-using Avalonia.Controls;
-using Avalonia.Platform.Storage;
-using System.IO;
-using Avalonia.Threading;
-
 
 namespace UMClient.ViewModels
 {
     public partial class MainWindowViewModel : ViewModelBase
     {
+        // 依赖服务
         private readonly QueryPortService queryPortService;
         private readonly ConfigurationService configService;
-        private readonly SerialPortService serialPortService;
         private readonly AutoSendService autoSendService;
+
+        private readonly SerialPortService serialPortService;
+        private TcpClientService? tcpClientService;
+        private TcpServerService? tcpServerService;
+
+        // 自动发送定时器
         private Timer? autoSendTimer;
 
         // 从导入文件自动定时发送
@@ -40,6 +44,24 @@ namespace UMClient.ViewModels
         // 循环发送
         private DispatcherTimer? cycleSendTimer;
 
+        #region 连接模式
+
+        public bool IsSerialPortMode => SelectedConnectionMode == ConnectionMode.SerialPort;
+        public bool IsTcpClientMode => SelectedConnectionMode == ConnectionMode.TcpClient;
+        public bool IsTcpServerMode => SelectedConnectionMode == ConnectionMode.TcpServer;
+        public bool IsUdpClientMode => SelectedConnectionMode == ConnectionMode.UdpClient;
+        public bool IsUdpServerMode => SelectedConnectionMode == ConnectionMode.UdpServer;
+
+        public ObservableCollection<ConnectionModeOption> ConnectionModeOptions { get; } = new ObservableCollection<ConnectionModeOption>()
+        {
+            new ConnectionModeOption() { Display = "串口", Value = ConnectionMode.SerialPort },
+            new ConnectionModeOption() { Display = "TCP服务器", Value = ConnectionMode.TcpServer },
+            new ConnectionModeOption() { Display = "TCP客户端", Value = ConnectionMode.TcpClient },
+            new ConnectionModeOption() { Display = "UDP服务器", Value = ConnectionMode.UdpServer },
+            new ConnectionModeOption() { Display = "UDP客户端", Value = ConnectionMode.UdpClient }
+        };
+
+        #endregion
 
 
         private static readonly Dictionary<string, SukiColorTheme> PredefinedThemes = new()
@@ -195,7 +217,19 @@ namespace UMClient.ViewModels
         [ObservableProperty]
         private int sentCount = 0;
 
-        // 串口配置
+        [ObservableProperty]
+        private string? selectedTemplate;
+
+        [ObservableProperty]
+        private string? selectedHistoryItem;
+
+        public ObservableCollection<string> SendTemplates { get; } = new ObservableCollection<string>();
+
+        public ObservableCollection<string> SendHistory { get; } = new ObservableCollection<string>();
+
+
+        #region 串口配置属性
+
         [ObservableProperty]
         private string selectedPortName = "COM1";
 
@@ -215,16 +249,9 @@ namespace UMClient.ViewModels
         private string selectedHandshake = "None";
 
         [ObservableProperty]
-        private string? selectedTemplate;
+        private SerialPortInfo? selectedPortInfo;
 
-        [ObservableProperty]
-        private string? selectedHistoryItem;
-
-
-
-        public ObservableCollection<string> SendTemplates { get; } = new ObservableCollection<string>();
-        public ObservableCollection<string> AvailablePorts { get; } = new ObservableCollection<string>();
-        public ObservableCollection<string> SendHistory { get; } = new ObservableCollection<string>();
+        public ObservableCollection<SerialPortInfo> AvailablePorts { get; } = new ObservableCollection<SerialPortInfo>();
 
         public ObservableCollection<string> ParityOptions { get; } = new ObservableCollection<string>()
         {
@@ -243,16 +270,29 @@ namespace UMClient.ViewModels
             "None", "XOnXOff", "RequestToSend", "RequestToSendXOnXOff"
         };
 
+        #endregion
 
-        public ObservableCollection<ConnectionModeOption> ConnectionModeOptions { get; } = new ObservableCollection<ConnectionModeOption>()
-        {
-            new ConnectionModeOption() { Display = "串口", Value = ConnectionMode.SerialPort },
-            new ConnectionModeOption() { Display = "TCP客户端", Value = ConnectionMode.TcpClient },
-            new ConnectionModeOption() { Display = "TCP服务器", Value = ConnectionMode.TcpServer },
-            new ConnectionModeOption() { Display = "UDP客户端", Value = ConnectionMode.UdpClient },
-            new ConnectionModeOption() { Display = "UDP服务器", Value = ConnectionMode.UdpServer }
-        };
+        #region Tcp配置属性
 
+        [ObservableProperty]
+        private string tcpServerAddress = "127.0.0.1";
+
+        [ObservableProperty]
+        private int tcpServerPort = 8080;
+
+        [ObservableProperty]
+        private string tcpListenAddress = "0.0.0.0";
+
+        [ObservableProperty]
+        private int tcpListenPort = 8080;
+
+        [ObservableProperty]
+        private int tcpConnectTimeout = 5000;
+
+        [ObservableProperty]
+        private int tcpMaxClients = 10;
+
+        #endregion
 
         private void InitializeDefaults()
         {
@@ -315,47 +355,29 @@ namespace UMClient.ViewModels
             {
                 if (IsConnected)
                 {
-                    // 断开连接时停止发送
-                    StopAutoSendLines();
-                    StopCycleSend();
-
                     // 断开连接
-                    await serialPortService.DisconnectAsync();
-                    IsConnected = false;
-                    StatusText = "已断开连接";
-
-                    // 停止自动发送定时器
-                    autoSendTimer?.Dispose();
-                    autoSendTimer = null;
+                    await DisconnectCurrentService();
+                    //StatusText = "已断开连接";
                 }
                 else
                 {
-                    // 建立连接
-                    var config = new SerialPortConfig
+                    switch (SelectedConnectionMode)
                     {
-                        PortName = SelectedPortName,
-                        BaudRate = SelectedBaudRate,
-                        Parity = Enum.Parse<Parity>(SelectedParity),
-                        DataBits = SelectedDataBits,
-                        StopBits = Enum.Parse<StopBits>(SelectedStopBits),
-                        Handshake = Enum.Parse<Handshake>(SelectedHandshake)
-                    };
-
-                    var success = await serialPortService.ConnectAsync(config);
-                    if (success)
-                    {
-                        IsConnected = true;
-                        StatusText = $"已连接到 {SelectedPortName} - {SelectedBaudRate}";
-
-                        if (IsAutoSendEnabled)
-                        {
-                            StartAutoSendTimer();
-                        }
+                        case ConnectionMode.SerialPort:
+                            await ConnectSerialPortAsync();
+                            break;
+                        case ConnectionMode.TcpServer:
+                            await StartTcpServerAsync();
+                            break;
+                        case ConnectionMode.TcpClient:
+                            await ConnectTcpClientAsync();
+                            break;
+                        case ConnectionMode.UdpServer:
+                            break;
+                        case ConnectionMode.UdpClient:
+                            break;
                     }
-                    else
-                    {
-                        StatusText = "连接失败";
-                    }
+
                 }
             }
             catch (Exception ex)
@@ -504,7 +526,22 @@ namespace UMClient.ViewModels
                     dataToSend = Encoding.UTF8.GetBytes(text);
                 }
 
-                await serialPortService.SendDataAsync(dataToSend);
+                // 根据连接模式发送数据
+                switch (SelectedConnectionMode)
+                {
+                    case ConnectionMode.SerialPort:
+                        await serialPortService.SendDataAsync(dataToSend);
+                        break;
+                    case ConnectionMode.TcpClient:
+                        await tcpClientService?.SendDataAsync(dataToSend);
+                        break;
+                    case ConnectionMode.TcpServer:
+                        await tcpServerService?.SendDataToAllAsync(dataToSend);
+                        break;
+                    default:
+                        throw new NotSupportedException($"发送模式 {SelectedConnectionMode} 暂不支持");
+                }
+
                 SentCount++;
 
                 // 如果不是循环发送,添加到发送历史
@@ -535,7 +572,7 @@ namespace UMClient.ViewModels
                 });
 
                 // 根据参数决定是否清空发送框
-                if (clearSendData && !IsCycleSendRunning)
+                if (clearSendData && !IsCycleSendRunning && !IsAutoSendEnabled)
                 {
                     SendData = string.Empty;
                 }
@@ -584,26 +621,35 @@ namespace UMClient.ViewModels
         }
 
         [RelayCommand]
+        private void SetTcpAddress(string address)
+        {
+            if(!string.IsNullOrEmpty(address))
+            {
+                TcpListenAddress = address;
+            }
+        }
+
+        [RelayCommand]
         private void RefreshPorts()
         {
             AvailablePorts.Clear();
 
             try
             {
-                List<string> ports = new List<string>();
+                List<SerialPortInfo> ports = new List<SerialPortInfo>();
 
                 if (OperatingSystem.IsWindows())
                 {
-                    var windowsPorts = queryPortService.GetWindowsSerialPorts();
+                    var windowsPorts = queryPortService.GetWindowsSerialPortInfo();
                     ports.AddRange(windowsPorts);
                 }
                 else if (OperatingSystem.IsLinux())
                 {
-                    ports.AddRange(queryPortService.GetLinuxSerialPorts());
+                    ports.AddRange(queryPortService.GetLinuxSerialPortInfo());
                 }
                 else if (OperatingSystem.IsMacOS())
                 {
-                    ports.AddRange(queryPortService.GetMacOSSerialPorts());
+                    ports.AddRange(queryPortService.GetMacOSSerialPortInfo());
                 }
 
                 if (ports.Count == 0)
@@ -617,11 +663,22 @@ namespace UMClient.ViewModels
                     AvailablePorts.Add(port);
                 }
 
-                // 如果当前选择的串口不在列表中，选择第一个可用的
-                if (AvailablePorts.Count > 0 && !AvailablePorts.Contains(SelectedPortName))
+                // 恢复之前选中的端口
+                var previousSelection = AvailablePorts.FirstOrDefault(p => p.PortName == SelectedPortName);
+                if (previousSelection != null)
                 {
-                    SelectedPortName = AvailablePorts[0];
+                    SelectedPortInfo = previousSelection;
                 }
+                else if (AvailablePorts.Count > 0)
+                {
+                    SelectedPortInfo = AvailablePorts[0];
+                }
+
+                // 如果当前选择的串口不在列表中，选择第一个可用的
+                //if (AvailablePorts.Count > 0 && !AvailablePorts.Contains(SelectedPortName))
+                //{
+                //    SelectedPortName = AvailablePorts[0];
+                //}
 
                 StatusText = $"检测到 {AvailablePorts.Count} 个可用串口";
             }
@@ -1032,6 +1089,262 @@ namespace UMClient.ViewModels
             }
         }
 
+        #region 连接/断开连接
+
+        private async Task ConnectSerialPortAsync()
+        {
+            var config = new SerialPortConfig
+            {
+                PortName = SelectedPortInfo.PortName,  // SelectedPortName,,
+                BaudRate = SelectedBaudRate,
+                Parity = Enum.Parse<Parity>(SelectedParity),
+                DataBits = SelectedDataBits,
+                StopBits = Enum.Parse<StopBits>(SelectedStopBits),
+                Handshake = Enum.Parse<Handshake>(SelectedHandshake)
+            };
+
+            var success = await serialPortService.ConnectAsync(config);
+            if (success)
+            {
+                IsConnected = true;
+                //StatusText = $"已连接到 {SelectedPortName} - {SelectedBaudRate}";
+                if (IsAutoSendEnabled)
+                {
+                    StartAutoSendTimer();
+                }
+            }
+        }
+
+        private async Task ConnectTcpClientAsync()
+        {
+            if (tcpClientService == null)
+            {
+                tcpClientService = new TcpClientService();
+                tcpClientService.DataReceived += OnDataReceived;
+                tcpClientService.StatusChanged += OnStatusChanged;
+            }
+
+            var config = new TcpClientConfig
+            {
+                ServerAddress = TcpServerAddress,
+                ServerPort = TcpServerPort,
+                ConnectTimeout = TcpConnectTimeout
+            };
+
+            var success = await tcpClientService.ConnectAsync(config);
+            if (success)
+            {
+                IsConnected = true;
+                if (IsAutoSendEnabled)
+                {
+                    StartAutoSendTimer();
+                }
+            }
+        }
+
+        private async Task StartTcpServerAsync()
+        {
+            if (tcpServerService == null)
+            {
+                tcpServerService = new TcpServerService();
+                tcpServerService.DataReceived += OnDataReceived;
+                tcpServerService.StatusChanged += OnStatusChanged;
+                tcpServerService.ClientConnected += OnTcpClientConnected;
+                tcpServerService.ClientDisconnected += OnTcpClientDisconnected;
+            }
+
+            var config = new TcpServerConfig
+            {
+                ListenAddress = TcpListenAddress,
+                ListenPort = TcpListenPort,
+                MaxClients = TcpMaxClients
+            };
+
+            var success = await tcpServerService.StartAsync(config);
+            if (success)
+            {
+                IsConnected = true;
+            }
+        }
+
+        private void OnTcpClientConnected(object? sender, string clientEndpoint)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                var message = $"[{timestamp}] 客户端连接: {clientEndpoint}";
+
+                ReceivedMessages.Add(new ColoredTextItem
+                {
+                    Text = message,
+                    Foreground = Brushes.Cyan
+                });
+            });
+        }
+
+        private void OnTcpClientDisconnected(object? sender, string clientEndpoint)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                var message = $"[{timestamp}] 客户端断开: {clientEndpoint}";
+
+                ReceivedMessages.Add(new ColoredTextItem
+                {
+                    Text = message,
+                    Foreground = Brushes.Orange
+                });
+            });
+        }
+
+        private async Task DisconnectCurrentService()
+        {
+            try
+            {
+                if (serialPortService != null)
+                {
+                    // 断开连接时停止发送
+                    StopAutoSendLines();
+                    StopCycleSend();
+
+                    await serialPortService.DisconnectAsync();
+
+                    // 停止自动发送定时器
+                    autoSendTimer?.Dispose();
+                    autoSendTimer = null;
+                }
+
+                if (tcpClientService != null)
+                {
+                    await tcpClientService.DisconnectAsync();
+                }
+
+                if (tcpServerService != null)
+                {
+                    await tcpServerService.StopAsync();
+                }
+
+                IsConnected = false;
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"断开连接时出错: {ex.Message}";
+            }
+        }
+
+        #endregion
+
+
+        #region 配置读取/保存
+
+        private void LoadConfiguration()
+        {
+            var config = configService.LoadConfiguration();
+
+            // 加载连接模式
+            SelectedConnectionModeOption = ConnectionModeOptions.FirstOrDefault(x => x.Value == config.LastConnectionMode) ?? ConnectionModeOptions.First();
+
+            // 加载串口配置
+            if (!string.IsNullOrEmpty(config.LastSerialPort))
+            {
+                SelectedPortName = config.LastSerialPort;
+            }
+            if (config.LastBaudRate > 0)
+            {
+                SelectedBaudRate = config.LastBaudRate;
+            }
+            if (!string.IsNullOrEmpty(config.LastParity))
+            {
+                SelectedParity = config.LastParity;
+            }
+            if (config.LastDataBits > 0)
+            {
+                SelectedDataBits = config.LastDataBits;
+            }
+            if (!string.IsNullOrEmpty(config.LastStopBits))
+            {
+                SelectedStopBits = config.LastStopBits;
+            }
+            if (!string.IsNullOrEmpty(config.LastHandshake))
+            {
+                SelectedHandshake = config.LastHandshake;
+            }
+
+            // 加载TCP配置
+            TcpServerAddress = config.TcpServerAddress;
+            TcpServerPort = config.TcpServerPort;
+            TcpListenAddress = config.TcpListenAddress;
+            TcpListenPort = config.TcpListenPort;
+            TcpConnectTimeout = config.TcpConnectTimeout;
+            TcpMaxClients = config.TcpMaxClients;
+
+            // 其他配置
+            IsHexReceiveMode = config.IsHexReceiveMode;
+            IsHexSendMode = config.IsHexSendMode;
+            AutoSendInterval = config.AutoSendInterval > 0 ? config.AutoSendInterval : 1000;
+            IsAutoSendEnabled = config.IsAutoSendEnabled;
+            ShowTimestamp = config.ShowTimestamp;
+            AutoWrap = config.AutoWrap;
+            AutoScroll = config.AutoScroll;
+            SendNewLine = config.SendNewLine;
+            IsCycleSend = config.IsCycleSend;
+            CycleSendCount = config.CycleSendCount;
+
+
+            if (!string.IsNullOrEmpty(config.LastSendData))
+            {
+                SendData = config.LastSendData;
+            }
+            // 加载发送历史
+            if (config.SendHistory != null)
+            {
+                SendHistory.Clear();
+                foreach (var item in config.SendHistory)
+                {
+                    SendHistory.Add(item);
+                }
+            }
+        }
+
+
+        public void SaveConfiguration()
+        {
+            var config = new AppConfiguration
+            {
+                LastConnectionMode = SelectedConnectionMode,
+                LastSerialPort = SelectedPortName,
+                LastBaudRate = SelectedBaudRate,
+                LastParity = SelectedParity,
+                LastDataBits = SelectedDataBits,
+                LastStopBits = SelectedStopBits,
+                LastHandshake = SelectedHandshake,
+                TcpServerAddress = TcpServerAddress,
+                TcpServerPort = TcpServerPort,
+                TcpListenAddress = TcpListenAddress,
+                TcpListenPort = TcpListenPort,
+                TcpConnectTimeout = TcpConnectTimeout,
+                TcpMaxClients = TcpMaxClients,
+                IsHexReceiveMode = IsHexReceiveMode,
+                IsHexSendMode = IsHexSendMode,
+                AutoSendInterval = AutoSendInterval,
+                IsAutoSendEnabled = IsAutoSendEnabled,
+                ShowTimestamp = ShowTimestamp,
+                AutoWrap = AutoWrap,
+                AutoScroll = AutoScroll,
+                SendNewLine = SendNewLine,
+                IsCycleSend = IsCycleSend,
+                CycleSendCount = CycleSendCount,
+                LastSendData = SendData,
+                SendHistory = SendHistory.ToList()
+
+            };
+            configService.SaveConfiguration(config);
+        }
+
+        #endregion
+
+
+
         partial void OnSelectedTemplateChanged(string? value)
         {
             if (!string.IsNullOrEmpty(value))
@@ -1151,58 +1464,6 @@ namespace UMClient.ViewModels
             return string.Join(" ", bytes.Select(b => b.ToString("X2")));
         }
 
-        private void LoadConfiguration()
-        {
-            var config = configService.LoadConfiguration();
-
-            // 只有在配置文件中有值时才覆盖默认值
-            if (!string.IsNullOrEmpty(config.LastSerialPort))
-                SelectedPortName = config.LastSerialPort;
-
-            if (config.LastBaudRate > 0)
-                SelectedBaudRate = config.LastBaudRate;
-
-            if (!string.IsNullOrEmpty(config.LastParity))
-                SelectedParity = config.LastParity;
-
-            if (config.LastDataBits > 0)
-                SelectedDataBits = config.LastDataBits;
-
-            if (!string.IsNullOrEmpty(config.LastStopBits))
-                SelectedStopBits = config.LastStopBits;
-
-            if (!string.IsNullOrEmpty(config.LastHandshake))
-                SelectedHandshake = config.LastHandshake;
-
-            IsHexReceiveMode = config.IsHexReceiveMode;
-            IsHexSendMode = config.IsHexSendMode;
-            AutoSendInterval = config.AutoSendInterval > 0 ? config.AutoSendInterval : 1000;
-            IsAutoSendEnabled = config.IsAutoSendEnabled;
-            ShowTimestamp = config.ShowTimestamp;
-            AutoWrap = config.AutoWrap;
-            AutoScroll = config.AutoScroll;
-            SendNewLine = config.SendNewLine;
-            IsCycleSend = config.IsCycleSend;
-            CycleSendCount = config.CycleSendCount;
-
-            SelectedConnectionModeOption = ConnectionModeOptions.FirstOrDefault(x => x.Value == config.LastConnectionMode) ?? ConnectionModeOptions.First();
-
-
-            if (!string.IsNullOrEmpty(config.LastSendData))
-            {
-                SendData = config.LastSendData;
-            }
-            // 加载发送历史
-            if (config.SendHistory != null)
-            {
-                SendHistory.Clear();
-                foreach (var item in config.SendHistory)
-                {
-                    SendHistory.Add(item);
-                }
-            }
-        }
-
         private void LoadSendTemplates()
         {
             var templates = configService.LoadSendTemplates();
@@ -1211,34 +1472,6 @@ namespace UMClient.ViewModels
             {
                 SendTemplates.Add(template);
             }
-        }
-
-        public void SaveConfiguration()
-        {
-            var config = new AppConfiguration
-            {
-                LastConnectionMode = SelectedConnectionMode,
-                LastSerialPort = SelectedPortName,
-                LastBaudRate = SelectedBaudRate,
-                LastParity = SelectedParity,
-                LastDataBits = SelectedDataBits,
-                LastStopBits = SelectedStopBits,
-                LastHandshake = SelectedHandshake,
-                IsHexReceiveMode = IsHexReceiveMode,
-                IsHexSendMode = IsHexSendMode,
-                AutoSendInterval = AutoSendInterval,
-                IsAutoSendEnabled = IsAutoSendEnabled,
-                ShowTimestamp = ShowTimestamp,
-                AutoWrap = AutoWrap,
-                AutoScroll = AutoScroll,
-                SendNewLine = SendNewLine,
-                LastSendData = SendData,
-                SendHistory = SendHistory.ToList(),
-                IsCycleSend = IsCycleSend,
-                CycleSendCount = CycleSendCount
-
-            };
-            configService.SaveConfiguration(config);
         }
 
         private Avalonia.Input.Platform.IClipboard? GetClipboard()
@@ -1269,6 +1502,30 @@ namespace UMClient.ViewModels
                 SaveConfiguration();
             }
         }
+
+        partial void OnSelectedConnectionModeChanged(ConnectionMode value)
+        {
+            // 断开当前连接
+            if (IsConnected)
+            {
+                _ = Task.Run(async () => await DisconnectCurrentService());
+            }
+
+            // 通知UI更新配置面板
+            OnPropertyChanged(nameof(IsSerialPortMode));
+            OnPropertyChanged(nameof(IsTcpClientMode));
+            OnPropertyChanged(nameof(IsTcpServerMode));
+        }
+
+
+        partial void OnSelectedPortInfoChanged(SerialPortInfo? value)
+        {
+            if (value != null)
+            {
+                SelectedPortName = value.PortName;
+            }
+        }
+
 
         partial void OnSelectedConnectionModeOptionChanged(ConnectionModeOption? value)
         {
