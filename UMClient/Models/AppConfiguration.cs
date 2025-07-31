@@ -24,15 +24,23 @@ namespace UMClient.Models
         #region TCP配置
 
         public string TcpServerAddress { get; set; } = "127.0.0.1";
-        public int TcpServerPort { get; set; } = 9006;
+        public int TcpServerPort { get; set; } = 9010;
         public string TcpListenAddress { get; set; } = "0.0.0.0";
-        public int TcpListenPort { get; set; } = 9016;
+        public int TcpListenPort { get; set; } = 9010;
         public int TcpConnectTimeout { get; set; } = 5000;
         public int TcpMaxClients { get; set; } = 20;
 
         #endregion
 
         #region UDP配置
+        public string UdpServerAddress { get; set; } = "127.0.0.1";
+        public int UdpServerPort { get; set; } = 9060;
+        public int UdpLocalPort { get; set; } = 0;
+        public string UdpListenAddress { get; set; } = "0.0.0.0";
+        public int UdpListenPort { get; set; } = 9060;
+        public int UdpReceiveTimeout { get; set; } = 5000;
+        public int UdpReceiveBufferSize { get; set; } = 4096;
+        public bool UdpBroadcastMode { get; set; } = false;
 
         #endregion
 
