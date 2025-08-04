@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +34,8 @@ namespace UMClient.ViewModels
         private readonly SerialPortService serialPortService;
         private TcpClientService? tcpClientService;
         private TcpServerService? tcpServerService;
+        private UdpClientService? udpClientService;
+        private UdpServerService? udpServerService;
 
         // 自动发送定时器
         private Timer? autoSendTimer;
@@ -146,7 +149,7 @@ namespace UMClient.ViewModels
         //    }
         //}
 
-
+        #region 通用属性
 
         [ObservableProperty]
         private string title = "串口调试工具";
@@ -227,6 +230,7 @@ namespace UMClient.ViewModels
 
         public ObservableCollection<string> SendHistory { get; } = new ObservableCollection<string>();
 
+        #endregion
 
         #region 串口配置属性
 
@@ -278,19 +282,49 @@ namespace UMClient.ViewModels
         private string tcpServerAddress = "127.0.0.1";
 
         [ObservableProperty]
-        private int tcpServerPort = 8080;
+        private int tcpServerPort = 9010;
 
         [ObservableProperty]
         private string tcpListenAddress = "0.0.0.0";
 
         [ObservableProperty]
-        private int tcpListenPort = 8080;
+        private int tcpListenPort = 9010;
 
         [ObservableProperty]
         private int tcpConnectTimeout = 5000;
 
         [ObservableProperty]
         private int tcpMaxClients = 10;
+
+        #endregion
+
+        #region Udp配置属性
+
+        [ObservableProperty]
+        private string udpServerAddress = "127.0.0.1";
+
+        [ObservableProperty]
+        private int udpServerPort = 9060;
+
+        [ObservableProperty]
+        private int udpLocalPort = 0; // 0表示自动分配
+
+        [ObservableProperty]
+        private string udpListenAddress = "0.0.0.0";
+
+        [ObservableProperty]
+        private int udpListenPort = 9060;
+
+        [ObservableProperty]
+        private int udpReceiveTimeout = 5000;
+
+        [ObservableProperty]
+        private int udpReceiveBufferSize = 4096;
+
+        [ObservableProperty]
+        private bool udpBroadcastMode = false; // UDP服务器是否使用广播模式
+
+        public ObservableCollection<IPEndPoint> UdpKnownClients { get; } = new ObservableCollection<IPEndPoint>();
 
         #endregion
 
@@ -373,8 +407,10 @@ namespace UMClient.ViewModels
                             await ConnectTcpClientAsync();
                             break;
                         case ConnectionMode.UdpServer:
+                            await StartUdpServerAsync();
                             break;
                         case ConnectionMode.UdpClient:
+                            await ConnectUdpClientAsync();
                             break;
                     }
 
@@ -426,6 +462,90 @@ namespace UMClient.ViewModels
             }
         }
 
+        [RelayCommand]
+        private void ClearUdpClients()
+        {
+            if (udpServerService != null)
+            {
+                udpServerService.ClearKnownClients();
+                UdpKnownClients.Clear();
+                StatusText = "已清空UDP客户端列表";
+            }
+        }
+
+        [RelayCommand]
+        private async Task SendToSpecificUdpClientAsync(IPEndPoint? clientEndPoint)
+        {
+            if (clientEndPoint != null && udpServerService != null && !string.IsNullOrEmpty(SendData))
+            {
+                try
+                {
+                    byte[] dataToSend;
+                    if (IsHexSendMode)
+                    {
+                        dataToSend = ConvertHexStringToBytes(SendData);
+                    }
+                    else
+                    {
+                        var text = SendData;
+                        if (SendNewLine)
+                        {
+                            text += Environment.NewLine;
+                        }
+                        dataToSend = Encoding.UTF8.GetBytes(text);
+                    }
+
+                    await udpServerService.SendDataToClientAsync(dataToSend, clientEndPoint);
+                    StatusText = $"已发送数据到 {clientEndPoint}";
+                }
+                catch (Exception ex)
+                {
+                    StatusText = $"发送到指定客户端失败: {ex.Message}";
+                }
+            }
+        }
+
+        [RelayCommand]
+        private async Task SendUdpBroadcastAsync()
+        {
+            if (SelectedConnectionMode == ConnectionMode.UdpServer && udpServerService != null)
+            {
+                if (!string.IsNullOrEmpty(SendData))
+                {
+                    try
+                    {
+                        byte[] dataToSend;
+                        if (IsHexSendMode)
+                        {
+                            dataToSend = ConvertHexStringToBytes(SendData);
+                        }
+                        else
+                        {
+                            var text = SendData;
+                            if (SendNewLine)
+                            {
+                                text += Environment.NewLine;
+                            }
+                            dataToSend = Encoding.UTF8.GetBytes(text);
+                        }
+
+                        await udpServerService.BroadcastDataAsync(dataToSend, UdpListenPort);
+                        StatusText = "UDP广播数据已发送";
+                    }
+                    catch (Exception ex)
+                    {
+                        StatusText = $"UDP广播失败: {ex.Message}";
+                    }
+                }
+                else
+                {
+                    StatusText = "请输入要广播的数据";
+                }
+            }
+        }
+
+
+        #region 循环发送
 
         private void StartCycleSend()
         {
@@ -532,11 +652,24 @@ namespace UMClient.ViewModels
                     case ConnectionMode.SerialPort:
                         await serialPortService.SendDataAsync(dataToSend);
                         break;
+                    case ConnectionMode.TcpServer:
+                        await tcpServerService?.SendDataToAllAsync(dataToSend);
+                        break;
                     case ConnectionMode.TcpClient:
                         await tcpClientService?.SendDataAsync(dataToSend);
                         break;
-                    case ConnectionMode.TcpServer:
-                        await tcpServerService?.SendDataToAllAsync(dataToSend);
+                    case ConnectionMode.UdpServer:
+                        if (UdpBroadcastMode)
+                        {
+                            await udpServerService?.BroadcastDataAsync(dataToSend, UdpListenPort);
+                        }
+                        else
+                        {
+                            await udpServerService?.SendDataToAllAsync(dataToSend);
+                        }
+                        break;
+                    case ConnectionMode.UdpClient:
+                        await udpClientService?.SendDataAsync(dataToSend);
                         break;
                     default:
                         throw new NotSupportedException($"发送模式 {SelectedConnectionMode} 暂不支持");
@@ -610,6 +743,7 @@ namespace UMClient.ViewModels
             }
         }
 
+        #endregion
 
         [RelayCommand]
         private void SetBaudRate(string baudRate)
@@ -623,9 +757,18 @@ namespace UMClient.ViewModels
         [RelayCommand]
         private void SetTcpAddress(string address)
         {
-            if(!string.IsNullOrEmpty(address))
+            if (!string.IsNullOrEmpty(address))
             {
                 TcpListenAddress = address;
+            }
+        }
+
+        [RelayCommand]
+        private void SetUdpAddress(string address)
+        {
+            if (!string.IsNullOrEmpty(address))
+            {
+                UdpListenAddress = address;
             }
         }
 
@@ -1091,6 +1234,9 @@ namespace UMClient.ViewModels
 
         #region 连接/断开连接
 
+        /// <summary>
+        /// 串口连接
+        /// </summary>
         private async Task ConnectSerialPortAsync()
         {
             var config = new SerialPortConfig
@@ -1115,6 +1261,9 @@ namespace UMClient.ViewModels
             }
         }
 
+        /// <summary>
+        /// TCP客户端连接
+        /// </summary>
         private async Task ConnectTcpClientAsync()
         {
             if (tcpClientService == null)
@@ -1142,6 +1291,10 @@ namespace UMClient.ViewModels
             }
         }
 
+        /// <summary>
+        /// 启动TCP服务器
+        /// </summary>
+        /// <returns></returns>
         private async Task StartTcpServerAsync()
         {
             if (tcpServerService == null)
@@ -1197,6 +1350,120 @@ namespace UMClient.ViewModels
             });
         }
 
+        /// <summary>
+        /// UDP客户端连接
+        /// </summary>
+        private async Task ConnectUdpClientAsync()
+        {
+            if (udpClientService == null)
+            {
+                udpClientService = new UdpClientService();
+                udpClientService.DataReceived += OnDataReceived;
+                udpClientService.StatusChanged += OnStatusChanged;
+            }
+
+            var config = new UdpClientConfig
+            {
+                ServerAddress = UdpServerAddress,
+                ServerPort = UdpServerPort,
+                LocalPort = UdpLocalPort,
+                ReceiveTimeout = UdpReceiveTimeout
+            };
+
+            var success = await udpClientService.ConnectAsync(config);
+            if (success)
+            {
+                IsConnected = true;
+                if (IsAutoSendEnabled)
+                {
+                    StartAutoSendTimer();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 启动UDP服务器
+        /// </summary>
+        private async Task StartUdpServerAsync()
+        {
+            if (udpServerService == null)
+            {
+                udpServerService = new UdpServerService();
+                udpServerService.DataReceived += OnUdpServerDataReceived;
+                udpServerService.StatusChanged += OnStatusChanged;
+                udpServerService.ClientDiscovered += OnUdpClientDiscovered;
+            }
+
+            var config = new UdpServerConfig
+            {
+                ListenAddress = UdpListenAddress,
+                ListenPort = UdpListenPort,
+                ReceiveBufferSize = UdpReceiveBufferSize
+            };
+
+            var success = await udpServerService.StartAsync(config);
+            if (success)
+            {
+                IsConnected = true;
+            }
+        }
+
+        /// <summary>
+        /// UDP服务器数据接收处理
+        /// </summary>
+        private void OnUdpServerDataReceived(object? sender, (byte[] data, IPEndPoint sender) e)
+        {
+            if (IsDisplayPaused) return;
+
+            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            var displayText = IsHexReceiveMode
+                ? ConvertBytesToHexString(e.data)
+                : Encoding.UTF8.GetString(e.data);
+
+            var finalText = ShowTimestamp
+                ? $"[{timestamp}] 接收自 {e.sender}: {displayText}"
+                : $"接收自 {e.sender}: {displayText}";
+
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                ReceivedMessages.Add(new ColoredTextItem
+                {
+                    Text = finalText,
+                    Foreground = Brushes.Lime
+                });
+                ReceivedCount++;
+
+                if (ReceivedMessages.Count > 1000)
+                {
+                    ReceivedMessages.RemoveAt(0);
+                }
+            });
+        }
+
+        /// <summary>
+        /// UDP客户端发现处理
+        /// </summary>
+        private void OnUdpClientDiscovered(object? sender, IPEndPoint clientEndPoint)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (!UdpKnownClients.Contains(clientEndPoint))
+                {
+                    UdpKnownClients.Add(clientEndPoint);
+                }
+
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                var message = $"[{timestamp}] 发现UDP客户端: {clientEndPoint}";
+
+                ReceivedMessages.Add(new ColoredTextItem
+                {
+                    Text = message,
+                    Foreground = Brushes.Cyan
+                });
+            });
+        }
+
+
         private async Task DisconnectCurrentService()
         {
             try
@@ -1214,14 +1481,25 @@ namespace UMClient.ViewModels
                     autoSendTimer = null;
                 }
 
-                if (tcpClientService != null)
-                {
-                    await tcpClientService.DisconnectAsync();
-                }
-
                 if (tcpServerService != null)
                 {
-                    await tcpServerService.StopAsync();
+                    await tcpServerService?.StopAsync();
+                }
+
+                if (tcpClientService != null)
+                {
+                    await tcpClientService?.DisconnectAsync();
+                }
+
+                if (udpServerService != null)
+                {
+                    await udpServerService.StopAsync();
+                    UdpKnownClients.Clear();
+                }
+
+                if (udpClientService != null)
+                {
+                    await udpClientService.DisconnectAsync();
                 }
 
                 IsConnected = false;
@@ -1278,6 +1556,16 @@ namespace UMClient.ViewModels
             TcpConnectTimeout = config.TcpConnectTimeout;
             TcpMaxClients = config.TcpMaxClients;
 
+            // 加载UDP配置
+            UdpServerAddress = config.UdpServerAddress;
+            UdpServerPort = config.UdpServerPort;
+            UdpLocalPort = config.UdpLocalPort;
+            UdpListenAddress = config.UdpListenAddress;
+            UdpListenPort = config.UdpListenPort;
+            UdpReceiveTimeout = config.UdpReceiveTimeout;
+            UdpReceiveBufferSize = config.UdpReceiveBufferSize;
+            UdpBroadcastMode = config.UdpBroadcastMode;
+
             // 其他配置
             IsHexReceiveMode = config.IsHexReceiveMode;
             IsHexSendMode = config.IsHexSendMode;
@@ -1306,7 +1594,6 @@ namespace UMClient.ViewModels
             }
         }
 
-
         public void SaveConfiguration()
         {
             var config = new AppConfiguration
@@ -1324,6 +1611,14 @@ namespace UMClient.ViewModels
                 TcpListenPort = TcpListenPort,
                 TcpConnectTimeout = TcpConnectTimeout,
                 TcpMaxClients = TcpMaxClients,
+                UdpServerAddress = UdpServerAddress,
+                UdpServerPort = UdpServerPort,
+                UdpLocalPort = UdpLocalPort,
+                UdpListenAddress = UdpListenAddress,
+                UdpListenPort = UdpListenPort,
+                UdpReceiveTimeout = UdpReceiveTimeout,
+                UdpReceiveBufferSize = UdpReceiveBufferSize,
+                UdpBroadcastMode = UdpBroadcastMode,
                 IsHexReceiveMode = IsHexReceiveMode,
                 IsHexSendMode = IsHexSendMode,
                 AutoSendInterval = AutoSendInterval,
@@ -1513,8 +1808,10 @@ namespace UMClient.ViewModels
 
             // 通知UI更新配置面板
             OnPropertyChanged(nameof(IsSerialPortMode));
-            OnPropertyChanged(nameof(IsTcpClientMode));
             OnPropertyChanged(nameof(IsTcpServerMode));
+            OnPropertyChanged(nameof(IsTcpClientMode));
+            OnPropertyChanged(nameof(IsUdpServerMode));
+            OnPropertyChanged(nameof(IsUdpClientMode));
         }
 
 
