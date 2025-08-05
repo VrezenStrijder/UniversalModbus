@@ -164,30 +164,29 @@
 							<TextBlock Text="TCP服务器配置" FontWeight="Bold" FontSize="15" Margin="0,10,0,10" Foreground="Purple"/>
 							<StackPanel>
 								<StackPanel>
-									<TextBlock Text="监听地址:" FontWeight="Bold" Margin="0,0,0,5"/>
+									<TextBlock Text="监听地址:" FontWeight="Bold" Margin="0,0,0,8"/>
 									<Grid ColumnDefinitions="*,Auto">
 										<TextBox Grid.Column="0" Text="{Binding TcpListenAddress}" Watermark="输入监听地址" Margin="0,0,5,0"/>
 										<Button Grid.Column="1" Content="▼" Width="72" Height="36" HorizontalContentAlignment="Center">
-										<Button.Flyout>
-											<Flyout>
-												<StackPanel Background="AliceBlue">
-													<Button Content="0.0.0.0 (所有接口)" Command="{Binding SetTcpAddressCommand}" CommandParameter="0.0.0.0" HorizontalAlignment="Stretch"/>
-													<Button Content="127.0.0.1 (本地回环)" Command="{Binding SetTcpAddressCommand}" CommandParameter="127.0.0.1" HorizontalAlignment="Stretch"/>
-												</StackPanel>
-											</Flyout>
-										</Button.Flyout>
-									</Button>
-
+											<Button.Flyout>
+												<Flyout>
+													<StackPanel Background="AliceBlue">
+														<Button Content="0.0.0.0 (所有接口)" Command="{Binding SetTcpAddressCommand}" CommandParameter="0.0.0.0" HorizontalAlignment="Stretch"/>
+														<Button Content="127.0.0.1 (本地回环)" Command="{Binding SetTcpAddressCommand}" CommandParameter="127.0.0.1" HorizontalAlignment="Stretch"/>
+													</StackPanel>
+												</Flyout>
+											</Button.Flyout>
+										</Button>
 									</Grid>
 								</StackPanel>
 
 								<StackPanel>
-									<TextBlock Text="监听端口:" FontWeight="Bold" Margin="0,0,0,5"/>
+									<TextBlock Text="监听端口:" FontWeight="Bold" Margin="0,10,0,8"/>
 									<NumericUpDown Value="{Binding TcpListenPort}" Minimum="1" Maximum="65535" HorizontalAlignment="Stretch" Height="36"/>
 								</StackPanel>
 
 								<StackPanel>
-									<TextBlock Text="最大客户端数:" FontWeight="Bold" Margin="0,0,0,5"/>
+									<TextBlock Text="最大客户端数:" FontWeight="Bold" Margin="0,10,0,8"/>
 									<NumericUpDown Value="{Binding TcpMaxClients}" Minimum="1" Maximum="100" HorizontalAlignment="Stretch" Height="36"/>
 								</StackPanel>
 							</StackPanel>
@@ -196,40 +195,120 @@
 						<!-- TCP客户端配置 -->
 						<StackPanel IsVisible="{Binding IsTcpClientMode}"  Spacing="6">
 							<TextBlock Text="TCP客户端配置" FontWeight="Bold" FontSize="15" Margin="0,10,0,10" Foreground="Green"/>
-
-							<StackPanel Spacing="12">
+							<StackPanel>
 								<StackPanel>
-									<TextBlock Text="服务器地址:" FontWeight="Bold" Margin="0,0,0,5"/>
+									<TextBlock Text="服务器地址:" FontWeight="Bold" Margin="0,0,0,8"/>
 									<TextBox Text="{Binding TcpServerAddress}" Watermark="输入服务器IP地址" HorizontalAlignment="Stretch"/>
 								</StackPanel>
 
 								<StackPanel>
-									<TextBlock Text="服务器端口:" FontWeight="Bold" Margin="0,0,0,5"/>
+									<TextBlock Text="服务器端口:" FontWeight="Bold" Margin="0,10,0,8"/>
 									<NumericUpDown Value="{Binding TcpServerPort}" Minimum="1" Maximum="65535"
 												  HorizontalAlignment="Stretch" Height="36"/>
 								</StackPanel>
 
 								<StackPanel>
-									<TextBlock Text="连接超时(ms):" FontWeight="Bold" Margin="0,0,0,5"/>
+									<TextBlock Text="连接超时(ms):" FontWeight="Bold" Margin="0,10,0,8"/>
 									<NumericUpDown Value="{Binding TcpConnectTimeout}" Minimum="1000" Maximum="30000"
 												  HorizontalAlignment="Stretch" Height="36"/>
 								</StackPanel>
 							</StackPanel>
 						</StackPanel>
 
-						<!-- UDP配置 -->
-						<StackPanel IsVisible="{Binding IsUdpClientMode}">
-							<TextBlock Text="UDP客户端配置" FontWeight="Bold" FontSize="14" Margin="0,10,0,10" Foreground="Orange"/>
+						<!-- UDP服务器配置 -->
+						<StackPanel IsVisible="{Binding IsUdpServerMode}" Spacing="6">
+							<TextBlock Text="UDP服务器配置" FontWeight="Bold" FontSize="14" Margin="0,10,0,10" Foreground="Red"/>
+							<StackPanel>
+								<StackPanel>
+									<TextBlock Text="监听地址:" FontWeight="Bold" Margin="0,0,0,8"/>
+									<Grid ColumnDefinitions="*,Auto">
+										<TextBox Grid.Column="0" Text="{Binding UdpListenAddress}" Watermark="输入监听地址" Margin="0,0,5,0"/>
+										<Button Grid.Column="1" Content="▼" Width="72" Height="36" HorizontalContentAlignment="Center">
+											<Button.Flyout>
+												<Flyout>
+													<StackPanel Background="AliceBlue">
+														<Button Content="0.0.0.0 (所有接口)" Command="{Binding SetUdpAddressCommand}" CommandParameter="0.0.0.0" HorizontalAlignment="Stretch"/>
+														<Button Content="127.0.0.1 (本地回环)" Command="{Binding SetUdpAddressCommand}" CommandParameter="127.0.0.1" HorizontalAlignment="Stretch"/>
+													</StackPanel>
+												</Flyout>
+											</Button.Flyout>
+										</Button>
+									</Grid>
+								</StackPanel>
+
+								<StackPanel>
+									<TextBlock Text="监听端口:" FontWeight="Bold" Margin="0,10,0,8"/>
+									<NumericUpDown Value="{Binding UdpListenPort}" Minimum="1" Maximum="65535"
+												  HorizontalAlignment="Stretch" Height="36"/>
+								</StackPanel>
+
+								<StackPanel>
+									<TextBlock Text="接收缓冲区大小:" FontWeight="Bold" Margin="0,10,0,8"/>
+									<NumericUpDown Value="{Binding UdpReceiveBufferSize}" Minimum="1024" Maximum="65536"
+												  HorizontalAlignment="Stretch" Height="36"/>
+								</StackPanel>
+
+								<StackPanel>
+									<CheckBox Content="广播模式" IsChecked="{Binding UdpBroadcastMode}" Margin="0,10,0,8"/>
+									<TextBlock Text="(启用后发送数据将广播到网络)" FontSize="10" Foreground="Gray"/>
+								</StackPanel>
+
+								<StackPanel IsVisible="{Binding IsConnected}">
+									<TextBlock Text="已知客户端:" FontWeight="Bold" Margin="0,10,0,8"/>
+									<Border BorderBrush="Gray" BorderThickness="1" MaxHeight="100">
+										<ScrollViewer>
+											<ItemsControl ItemsSource="{Binding UdpKnownClients}">
+												<ItemsControl.ItemTemplate>
+													<DataTemplate>
+														<Grid ColumnDefinitions="*,Auto" Margin="2">
+															<TextBlock Grid.Column="0" Text="{Binding}" VerticalAlignment="Center" FontSize="11"/>
+															<Button Grid.Column="1" Content="发送" Width="40" Height="20" FontSize="10"
+																   Command="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).SendToSpecificUdpClientCommand}"
+																   CommandParameter="{Binding}"/>
+														</Grid>
+													</DataTemplate>
+												</ItemsControl.ItemTemplate>
+											</ItemsControl>
+										</ScrollViewer>
+									</Border>
+									<Button Content="清空客户端列表" Command="{Binding ClearUdpClientsCommand}"
+										   HorizontalAlignment="Stretch" Height="30" Margin="0,5,0,0"/>
+								</StackPanel>
+
+							</StackPanel>
 						</StackPanel>
 
-						<StackPanel IsVisible="{Binding IsUdpServerMode}">
-							<TextBlock Text="UDP服务器配置" FontWeight="Bold" FontSize="14" Margin="0,10,0,10" Foreground="Red"/>
+						<!-- UDP配置 -->
+						<StackPanel IsVisible="{Binding IsUdpClientMode}" Spacing="6">
+							<TextBlock Text="UDP客户端配置" FontWeight="Bold" FontSize="14" Margin="0,10,0,10" Foreground="Orange"/>
+							<StackPanel>
+								<StackPanel>
+									<TextBlock Text="服务器地址:" FontWeight="Bold" Margin="0,0,0,8"/>
+									<TextBox Text="{Binding UdpServerAddress}" Watermark="输入服务器IP地址" HorizontalAlignment="Stretch"/>
+								</StackPanel>
+
+								<StackPanel>
+									<TextBlock Text="服务器端口:" FontWeight="Bold" Margin="0,10,0,8"/>
+									<NumericUpDown Value="{Binding UdpServerPort}" Minimum="1" Maximum="65535" HorizontalAlignment="Stretch" Height="36"/>
+								</StackPanel>
+
+								<StackPanel>
+									<TextBlock Text="本地端口:" FontWeight="Bold" Margin="0,10,0,8"/>
+									<NumericUpDown Value="{Binding UdpLocalPort}" Minimum="0" Maximum="65535" HorizontalAlignment="Stretch" Height="36"/>
+									<TextBlock Text="(0 = 自动分配)" FontSize="10" Foreground="Gray"/>
+								</StackPanel>
+
+								<StackPanel>
+									<TextBlock Text="接收超时(ms):" FontWeight="Bold" Margin="0,10,0,8"/>
+									<NumericUpDown Value="{Binding UdpReceiveTimeout}" Minimum="1000" Maximum="30000" HorizontalAlignment="Stretch" Height="36"/>
+								</StackPanel>
+							</StackPanel>
 						</StackPanel>
 
 						<!-- 连接按钮 -->
 						<Button Command="{Binding ConnectCommand}" HorizontalAlignment="Stretch" Height="40" Margin="0,15,0,0">
 							<Button.Content>
-								<TextBlock Text="{Binding IsConnected, Converter={x:Static converters:BooleanToStringConverter.Instance}, ConverterParameter='断开连接|打开串口'}" FontWeight="Bold"/>
+								<TextBlock Text="{Binding IsConnected, Converter={x:Static converters:BooleanToStringConverter.Instance}, ConverterParameter='断开连接|启动连接'}" FontWeight="Bold"/>
 							</Button.Content>
 							<Button.Styles>
 								<Style Selector="Button">
@@ -239,7 +318,7 @@
 									<Setter Property="Foreground" Value="White"/>
 								</Style>
 								<Style Selector="Button:pressed">
-									<Setter Property="Background" Value="Red"/>
+									<Setter Property="Background" Value="IndianRed"/>
 								</Style>
 								<Style Selector="Button:pressed TextBlock">
 									<Setter Property="Foreground" Value="White"/>
@@ -252,7 +331,7 @@
 			</suki:GroupBox>
 
 			<!-- 右侧数据显示和发送区域 -->
-			<ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"						 Margin="10">
+			<ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="10">
 				<StackPanel Spacing="5">
 
 					<!-- 发送数据区 (上部) -->
@@ -357,31 +436,49 @@
 								</StackPanel>
 							</Grid>
 
-
-							<!-- 发送输入框和按钮 -->
-							<!--<Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-							<TextBox Grid.Column="0" Text="{Binding SendData}" Watermark="请输入要发送的数据" Margin="0,0,10,0" TextWrapping="Wrap" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-							<Button Grid.Column="1" Content="发送" Command="{Binding SendDataCommand}" Width="80" Height="40" VerticalAlignment="Top">
-								<Button.Content>
-									<TextBlock Text="发送" FontWeight="Bold"/>
-								</Button.Content>
-								<Button.Styles>
-									<Style Selector="Button">
-										<Setter Property="Background" Value="DodgerBlue"/>
-									</Style>
-									<Style Selector="Button TextBlock">
-										<Setter Property="Foreground" Value="White"/>
-									</Style>
-								</Button.Styles>
-							</Button>
-						</Grid>-->
-
 							<!-- 发送区按钮 -->
 							<StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
 								<Button Content="复制发送数据" Command="{Binding CopySendDataCommand}" Height="36"/>
 								<Button Content="清空发送区" Command="{Binding ClearSendDataCommand}" Height="36"/>
 								<Button Content="清空计数器" Command="{Binding ClearCounterCommand}" Height="36"/>
 								<Button Content="从文件导入" Command="{Binding ImportFromFileCommand}" Height="36"/>
+
+								<!-- UDP广播 -->
+								<Button Command="{Binding SendUdpBroadcastCommand}" Height="36" IsVisible="{Binding IsUdpServerMode}" Background="Purple" Foreground="White">
+									<Button.Content>
+										<TextBlock Text="UDP广播" />
+									</Button.Content>
+									<Button.Styles>
+										<Style Selector="Button">
+											<Setter Property="Background" Value="Purple"/>
+										</Style>
+										<Style Selector="Button TextBlock">
+											<Setter Property="Foreground" Value="White"/>
+										</Style>
+									</Button.Styles>
+								</Button>
+								
+								<!-- 停止文件发送 -->
+								<Button Command="{Binding StopFileSendingCommand}" Height="36" Background="IndianRed" Foreground="White">
+									<Button.Content>
+										<TextBlock Text="停止文件发送" />
+									</Button.Content>
+									<Button.Styles>
+										<Style Selector="Button">
+											<Setter Property="Background" Value="IndianRed"/>
+										</Style>
+										<Style Selector="Button TextBlock">
+											<Setter Property="Foreground" Value="White"/>
+										</Style>
+										<Style Selector="Button:pressed">
+											<Setter Property="Background" Value="Red"/>
+										</Style>
+										<Style Selector="Button:pressed TextBlock">
+											<Setter Property="Foreground" Value="White"/>
+										</Style>
+									</Button.Styles>
+								</Button>
+
 							</StackPanel>
 						</Grid>
 					</suki:GroupBox>
