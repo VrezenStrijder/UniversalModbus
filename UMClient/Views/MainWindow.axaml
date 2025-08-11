@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:UMClient.ViewModels"
 		xmlns:suki="using:SukiUI.Controls"
+		xmlns:sukiUI ="https://github.com/kikipoulet/SukiUI"
         xmlns:material="using:Material.Icons.Avalonia"
 		xmlns:controls="using:UMClient.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -14,21 +15,107 @@
         Title="{Binding Title}"
 		Opacity="0.9">
 
-	<!--<suki:SukiWindow.RightWindowTitleBarControls>
-        <StackPanel Orientation="Horizontal" Spacing="10" Margin="10,0">
-            <TextBlock Text="主题:" VerticalAlignment="Center" Foreground="White"/>
-            <ComboBox SelectedItem="{Binding SelectedTheme}" 
-                     ItemsSource="{Binding ThemeOptions}" 
-                     Width="120" Height="30"
-                     VerticalAlignment="Center">
-                <ComboBox.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Text="{Binding Display}"/>
-                    </DataTemplate>
-                </ComboBox.ItemTemplate>
-            </ComboBox>
-        </StackPanel>
-    </suki:SukiWindow.RightWindowTitleBarControls>-->
+	<suki:SukiWindow.RightWindowTitleBarControls>
+		<StackPanel Orientation="Horizontal" Spacing="5" Margin="10,0">
+			<!-- 主题色选择 -->
+			<StackPanel Orientation="Horizontal" Spacing="10" Margin="10,0">
+				<Button Width="80" Height="20" HorizontalContentAlignment="Left" Padding="5,0">
+					<Button.Content>
+						<StackPanel Orientation="Horizontal" Spacing="5">
+							<Border Width="16" Height="16" Background="{Binding SelectedTheme.PrimaryBrush}" CornerRadius="8"/>
+							<TextBlock Text="主题色" VerticalAlignment="Center" FontSize="11"/>
+						</StackPanel>
+					</Button.Content>
+
+					<Button.Flyout>
+						<Flyout Placement="Bottom">
+							<ItemsControl ItemsSource="{Binding $parent[suki:SukiWindow].((vm:MainWindowViewModel)DataContext).AvailableColors}" Margin="0">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<WrapPanel Orientation="Vertical" MaxWidth="200"/>
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate>
+										<Button Width="22" Height="22" Command="{Binding $parent[suki:SukiWindow].((vm:MainWindowViewModel)DataContext).SetThemeColorCommand}"
+											   CommandParameter="{Binding}" CornerRadius="12" Margin="2" Padding="0" BorderThickness="2">
+											<Button.BorderBrush>
+												<MultiBinding Converter="{x:Static converters:ThemeSelectionConverter.Instance}">
+													<Binding />
+													<Binding Path="$parent[suki:SukiWindow].((vm:MainWindowViewModel)DataContext).SelectedTheme"/>
+												</MultiBinding>
+											</Button.BorderBrush>
+											<Border Background="{Binding PrimaryBrush}" CornerRadius="10" Width="20" Height="20"/>
+											<Button.Styles>
+												<Style Selector="Button">
+													<Setter Property="Background" Value="Transparent"/>
+												</Style>
+												<Style Selector="Button:pointerover">
+													<Setter Property="Background" Value="#20FFFFFF"/>
+												</Style>
+											</Button.Styles>
+										</Button>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</Flyout>
+					</Button.Flyout>
+				</Button>
+			</StackPanel>
+
+			<!-- 黑暗模式开关 -->
+			<CheckBox IsChecked="{Binding IsDarkMode}"  Width="40" Height="20" VerticalAlignment="Center"
+					  Command="{Binding SetDarkModeCommand}" CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}" >
+				<CheckBox.Template>
+					<ControlTemplate>
+						<Border Name="SwitchRoot" Background="#40D3D3D3" BorderBrush="#60D3D3D3" BorderThickness="1" CornerRadius="10" Width="40" Height="20">
+							<Canvas ClipToBounds="True">
+								<Border Name="SwitchKnob" Background="DarkGray" CornerRadius="8" Width="16" Height="16" Canvas.Left="2" Canvas.Top="2">
+									<Border.Transitions>
+										<Transitions>
+											<DoubleTransition Property="Canvas.Left" Duration="0:0:0.2"/>
+										</Transitions>
+									</Border.Transitions>
+								</Border>
+							</Canvas>
+						</Border>
+					</ControlTemplate>
+				</CheckBox.Template>
+
+				<CheckBox.Styles>
+					<!-- 选中状态 -->
+					<Style Selector="CheckBox:checked /template/ Border#SwitchRoot">
+						<Setter Property="Background" Value="#FF4A90E2"/>
+						<Setter Property="BorderBrush" Value="#FF4A90E2"/>
+					</Style>
+
+					<Style Selector="CheckBox:checked /template/ Border#SwitchKnob">
+						<Setter Property="Canvas.Left" Value="22"/>
+					</Style>
+
+					<!-- 悬停效果 -->
+					<Style Selector="CheckBox:pointerover /template/ Border#SwitchRoot">
+						<Setter Property="Background" Value="#60D3D3D3"/>
+					</Style>
+
+					<Style Selector="CheckBox:checked:pointerover /template/ Border#SwitchRoot">
+						<Setter Property="Background" Value="#FF5BA0F2"/>
+					</Style>
+
+					<!-- 按下效果 -->
+					<Style Selector="CheckBox:pressed /template/ Border#SwitchKnob">
+						<Setter Property="Width" Value="18"/>
+					</Style>
+
+					<!-- 禁用状态 -->
+					<Style Selector="CheckBox:disabled /template/ Border#SwitchRoot">
+						<Setter Property="Opacity" Value="0.5"/>
+					</Style>
+				</CheckBox.Styles>
+			</CheckBox>
+
+		</StackPanel>
+	</suki:SukiWindow.RightWindowTitleBarControls>
 
 	<Design.DataContext>
 		<!-- This only sets the DataContext for the previewer in an IDE,
@@ -262,17 +349,37 @@
 													<DataTemplate>
 														<Grid ColumnDefinitions="*,Auto" Margin="2">
 															<TextBlock Grid.Column="0" Text="{Binding}" VerticalAlignment="Center" FontSize="11"/>
-															<Button Grid.Column="1" Content="发送" Width="40" Height="20" FontSize="10"
-																   Command="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).SendToSpecificUdpClientCommand}"
-																   CommandParameter="{Binding}"/>
+															<Button  Grid.Column="1" Width="60" Height="20" HorizontalContentAlignment="Left" Padding="5,0" Command="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).SendToSpecificUdpClientCommand}" CommandParameter="{Binding}">
+																<Button.Content>
+																	<StackPanel Orientation="Horizontal" Spacing="5">
+																		<Border Width="16" Height="16"  CornerRadius="5"/>
+																		<TextBlock Text="发送" VerticalAlignment="Center" FontSize="10"/>
+																	</StackPanel>
+																</Button.Content>
+															</Button>
+
 														</Grid>
 													</DataTemplate>
 												</ItemsControl.ItemTemplate>
 											</ItemsControl>
 										</ScrollViewer>
 									</Border>
-									<Button Content="清空客户端列表" Command="{Binding ClearUdpClientsCommand}"
-										   HorizontalAlignment="Stretch" Height="30" Margin="0,5,0,0"/>
+									<Button Content="清空客户端列表" Command="{Binding ClearUdpClientsCommand}" HorizontalAlignment="Stretch" Height="40" Margin="0,5,0,0">
+										<Button.Content>
+											<TextBlock Text="清空客户端列表"/>
+										</Button.Content>
+										<Button.Styles>
+											<Style Selector="Button">
+												<Setter Property="Background" Value="WhiteSmoke"/>
+											</Style>
+											<Style Selector="Button TextBlock">
+												<Setter Property="Foreground" Value="Gray"/>
+											</Style>
+											<Style Selector="Button:pressed TextBlock">
+												<Setter Property="Foreground" Value="Black"/>
+											</Style>
+										</Button.Styles>
+									</Button>
 								</StackPanel>
 
 							</StackPanel>
@@ -457,7 +564,7 @@
 										</Style>
 									</Button.Styles>
 								</Button>
-								
+
 								<!-- 停止文件发送 -->
 								<Button Command="{Binding StopFileSendingCommand}" Height="36" Background="IndianRed" Foreground="White">
 									<Button.Content>
