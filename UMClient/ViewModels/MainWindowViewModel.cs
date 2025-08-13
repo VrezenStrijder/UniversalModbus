@@ -1036,7 +1036,8 @@ namespace UMClient.ViewModels
             {
                 ListenAddress = UdpListenAddress,
                 ListenPort = UdpListenPort,
-                ReceiveBufferSize = UdpReceiveBufferSize
+                ReceiveBufferSize = UdpReceiveBufferSize,
+                EnableBroadcast = UdpBroadcastMode
             };
 
             var success = await udpServerService.StartAsync(config);
