@@ -11,6 +11,9 @@ namespace UMClient.Models
         public string ListenAddress { get; set; } = "0.0.0.0";
         public int ListenPort { get; set; } = 9060;
         public int ReceiveBufferSize { get; set; } = 4096;
+
+        public bool EnableBroadcast { get; set; } = false;
+
     }
 
     public class UdpClientConfig
