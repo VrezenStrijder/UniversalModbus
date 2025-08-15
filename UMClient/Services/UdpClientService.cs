@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UMClient.Models;
+using System.Net.NetworkInformation;
 
 namespace UMClient.Services
 {
@@ -46,18 +47,31 @@ namespace UMClient.Services
                 }
 
                 serverEndPoint = new IPEndPoint(serverIp, config.ServerPort);
+                udpClient = new UdpClient();
 
                 // 创建UDP客户端
                 if (config.LocalPort > 0)
                 {
-                    localEndPoint = new IPEndPoint(IPAddress.Any, config.LocalPort);
-                    udpClient = new UdpClient(localEndPoint);
+                    localEndPoint = new IPEndPoint(IPAddress.Any, config.LocalPort); // 普通模式
                 }
                 else
                 {
-                    udpClient = new UdpClient();
-                    localEndPoint = udpClient.Client.LocalEndPoint as IPEndPoint;
+                    localEndPoint = new IPEndPoint(IPAddress.Any, config.ServerPort); // 广播模式，绑定服务端监听端口
                 }
+
+                udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                udpClient.Client.Bind(localEndPoint);
+
+
+                //
+                //localEndPoint = new IPEndPoint(IPAddress.Any, listenPort);
+                //udpClient = new UdpClient();
+                //// 必须设置 ReuseAddress，允许多个客户端实例在同一台机器上监听同一端口
+                //udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                //// 对于只接收的客户端，EnableBroadcast 不是必需的，但设置也无害
+                //udpClient.EnableBroadcast = true;
+                //udpClient.Client.Bind(localEndPoint);
+                //
 
                 // 设置接收超时
                 udpClient.Client.ReceiveTimeout = config.ReceiveTimeout;
