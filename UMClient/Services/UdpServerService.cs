@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UMClient.Models;
+using System.Net.NetworkInformation;
 
 namespace UMClient.Services
 {
@@ -17,7 +18,7 @@ namespace UMClient.Services
         private bool disposed = false;
         private CancellationTokenSource? cancellationTokenSource;
         private IPEndPoint? localEndPoint;
-        private readonly ConcurrentDictionary<string, IPEndPoint> knownClients = new();
+        private readonly ConcurrentDictionary<string, IPEndPoint> knownClients = new ConcurrentDictionary<string, IPEndPoint>();
 
         public event EventHandler<(byte[] data, IPEndPoint sender)>? DataReceived;
         public event EventHandler<string>? StatusChanged;
@@ -44,8 +45,18 @@ namespace UMClient.Services
                 }
 
                 localEndPoint = new IPEndPoint(listenIp, config.ListenPort);
-                udpServer = new UdpClient(localEndPoint);
 
+                if(!config.EnableBroadcast)
+                {
+                    udpServer = new UdpClient(localEndPoint);
+                }
+                else
+                {
+                    udpServer = new UdpClient();
+                    udpServer.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                    udpServer.EnableBroadcast = true;
+                    udpServer.Client.Bind(new IPEndPoint(IPAddress.Any, config.ListenPort));
+                }
                 // 设置接收缓冲区大小
                 udpServer.Client.ReceiveBufferSize = config.ReceiveBufferSize;
 
@@ -152,6 +163,9 @@ namespace UMClient.Services
                     var broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, port);
                     var bytesSent = await udpServer.SendAsync(data, data.Length, broadcastEndPoint);
                     StatusChanged?.Invoke(this, $"广播数据到端口 {port}，发送 {bytesSent} 字节");
+
+                    // 向其他广播地址发送
+                    //await SendToAllBroadcastAddresses(data, port);
                 }
                 catch (Exception ex)
                 {
@@ -164,6 +178,64 @@ namespace UMClient.Services
                 throw new InvalidOperationException("UDP服务器未启动");
             }
         }
+
+        #region 广播消息
+
+        private async Task SendToAllBroadcastAddresses(byte[] data , int port)
+        {
+            // 发送到通用广播地址
+            await udpServer.SendAsync(data, data.Length, new IPEndPoint(IPAddress.Broadcast, port));
+
+            var addresses = GetAllBroadcastAddresses();
+
+            // 发送到所有本地网络的广播地址
+            foreach (var broadcastAddress in addresses)
+            {
+                try
+                {
+                    await udpServer.SendAsync(data, data.Length, new IPEndPoint(broadcastAddress, port));
+                    StatusChanged?.Invoke(this, $"已发送到广播地址: {broadcastAddress}");
+                }
+                catch (Exception ex)
+                {
+                    StatusChanged?.Invoke(this, $"发送到 {broadcastAddress} 失败: {ex.Message}");
+                }
+            }
+        }
+
+        private List<IPAddress> GetAllBroadcastAddresses()
+        {
+            var broadcastAddresses = new List<IPAddress>();
+
+            foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (networkInterface.OperationalStatus == OperationalStatus.Up &&
+                    networkInterface.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                {
+                    var ipProperties = networkInterface.GetIPProperties();
+                    foreach (var unicast in ipProperties.UnicastAddresses)
+                    {
+                        if (unicast.Address.AddressFamily == AddressFamily.InterNetwork)
+                        {
+                            var address = unicast.Address.GetAddressBytes();
+                            var mask = unicast.IPv4Mask.GetAddressBytes();
+                            var broadcast = new byte[4];
+
+                            for (int i = 0; i < 4; i++)
+                            {
+                                broadcast[i] = (byte)(address[i] | ~mask[i]);
+                            }
+
+                            broadcastAddresses.Add(new IPAddress(broadcast));
+                        }
+                    }
+                }
+            }
+
+            return broadcastAddresses;
+        }
+        #endregion
+
 
         private async Task ReceiveDataLoop(CancellationToken cancellationToken)
         {
